@@ -1,0 +1,3 @@
+[submodule "datafetcher/fred"]
+	path = datafetcher/fred
+	url = https://github.com/zachwill/fred.git
