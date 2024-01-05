@@ -5,7 +5,7 @@ import requests
 import pandas as pd
 
 from datafetcher.utils import format_source
-from .fred_master.fred.core import Fred
+from .fred.fred.core import Fred
 from .congress_master.congress.congress import Congress
 
 class DataFetcher:
