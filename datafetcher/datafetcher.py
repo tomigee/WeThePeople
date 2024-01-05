@@ -6,6 +6,7 @@ import pandas as pd
 
 from datafetcher.utils import format_source
 from .fred_master.fred.core import Fred
+from .congress_master.congress.congress import Congress
 
 class DataFetcher:
     config_path = os.path.join(os.path.dirname(__file__), "config.json")
@@ -137,10 +138,36 @@ class FredDataFetcher(DataFetcher):
         return unpacked_data
     
     def search_datasets(self, search_text):
+        """Implementation of FRED API endpoint 'fred/series/search'
+
+        Args:
+            series_text (str): Text to search FRED Database for
+
+        Returns:
+            pandas.DataFrame: The data values as requested
+        """
+        
         data = self.fred.series('search', search_text=search_text)
         data = data["seriess"]
         unpacked_data = self.unpack_json(data)
         return unpacked_data
+    
+class CongressDataFetcher(DataFetcher):
+    def __init__(self):
+        super().__init__("congress")
+        _, api_key = self.fetch_tokens()
+        self.congress = Congress(api_key=api_key)
+        
+    def get_bill_info(self, congress_id, billType_id, billNumber_id, **params):
+        endpoint = '/'.join([congress_id, billType_id, billNumber_id])
+        data = self._get_dataset_info('bill', endpoint, **params)
+        return data
+        
+    def _get_dataset_info(self, dataset_type, endpoint, **params):
+        if dataset_type == "bill":
+            data = self.congress.bill(endpoint, **params)
+        
+        return data
     
 
 
