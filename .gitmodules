@@ -1,0 +1,9 @@
+[submodule "datafetcher/fred"]
+	path = datafetcher/fred
+	url = https://github.com/zachwill/fred.git
+[submodule "datafetcher/Congress"]
+	path = datafetcher/Congress
+	url = https://github.com/tomigee/Congress.git
+[submodule "datafetcher/BEA"]
+	path = datafetcher/BEA
+	url = https://github.com/tomigee/BEA.git
