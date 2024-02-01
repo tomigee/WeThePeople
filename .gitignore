@@ -2,7 +2,7 @@
 # Edit at https://www.toptal.com/developers/gitignore?templates=python
 
 # User specific
-playground.py
+playground.*
 .DS_Store
 .vscode/
 
