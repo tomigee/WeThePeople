@@ -1,8 +1,10 @@
+import os
+from os import path
+
 import requests
 from json import loads, dumps
 
-from .Congress.congress.core import Congress
-from .utils import strip_tags
+from .utils import strip_tags, process_filename, truncate_filepath
 
 
 class ApiData:
@@ -54,31 +56,58 @@ class ApiData:
             )
 
 
-def get_bill_text(
+def get_law_text(
     congress_num,
+    law_num,
+    law_title,
     bill_type,
-    bill_num,
-    indexing_key="type",
-    indexing_value="Enrolled Bill",
-    text_version_type="Formatted Text"
+    bill_number,
+    write_to_folder=None
 ):
 
-    args = [str(congress_num),
-            str(bill_type),
-            str(bill_num),
-            "text"]
-    path = "/".join(args)
-    response = loads(Congress().bill(path=path))
+    def compose_law_url(congress_num, law_num):
+        url = f"https://www.congress.gov/{congress_num}/plaws/publ{law_num}/PLAW-{congress_num}publ{law_num}.htm"  # noqa E501
+        return url
 
-    for bill_version in response["textVersions"]:
-        if bill_version[indexing_key] == indexing_value:
-            text_versions = bill_version["formats"]
-            for version in text_versions:
-                if version["type"] == text_version_type:
-                    bill_url = version["url"]
-                    break
-            break
+    def compose_bill_url(congress_num, bill_type, bill_number):
+        url = f"https://www.congress.gov/{congress_num}/bills/{bill_type.lower()}{bill_number}/BILLS-{congress_num}{bill_type.lower()}{bill_number}enr.htm"  # noqa E501
+        return url
 
-    temp = requests.get(bill_url)
-    bill_text = strip_tags(temp.text)
-    return bill_text
+    def get_clean_text(url):
+        response = requests.get(url)
+        clean_text = strip_tags(response.text)
+        return clean_text
+
+    law_title = process_filename(law_title)
+
+    if law_num is not None:
+        law_text = get_clean_text(
+            compose_law_url(congress_num, law_num)
+        )
+
+        # Check if law_text is legit. TODO: Find a better way to do this.
+        test_string = ".main-wrapper {overflow: visible !important;}"
+        if test_string in law_text:
+            # law_text isn't legit. Try another url
+            law_text = get_clean_text(
+                compose_bill_url(congress_num, bill_type, bill_number)
+            )
+
+    else:
+        law_text = get_clean_text(
+            compose_bill_url(congress_num, bill_type, bill_number)
+        )
+
+    # Write to file or return
+    if write_to_folder is None:
+        return law_text
+    else:
+        file_path = "/".join([str(write_to_folder), law_title+".txt"])
+        if len(file_path) > 255:
+            file_path = truncate_filepath(file_path)
+        folder_path = path.join(os.getcwd(), write_to_folder)
+        if not path.exists(folder_path):
+            os.mkdir(folder_path)
+
+        with open(file_path, 'w') as file:
+            file.write(law_text)
