@@ -5,6 +5,8 @@
 playground.*
 .DS_Store
 .vscode/
+FredData/
+Public Laws/
 
 ### Python ###
 # Byte-compiled / optimized / DLL files

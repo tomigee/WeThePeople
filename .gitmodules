@@ -6,4 +6,4 @@
 	url = https://github.com/tomigee/BEA.git
 [submodule "datafetcher/fred"]
 	path = datafetcher/fred
-	url = git@github.com:tomigee/fred.git
+	url = https://github.com/tomigee/fred.git
