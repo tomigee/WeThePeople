@@ -2,7 +2,7 @@ from datafetcher import compile_fred_training_dataset
 from datafetcher import compile_congress_training_dataset
 
 # Script parameters
-compile_congress_dataset = False
+compile_congress_dataset = True
 compile_fred_dataset = False
 
 if compile_congress_dataset:

@@ -7,21 +7,18 @@
 # - One bill per text file
 #
 # -------------------------------------------------------------------------------------------
-from utils import write_to_error_file
 
+import traceback as tb
+import re
+from json import loads, dump
+from datetime import datetime
 
-def count_leaves(tree):
-    count = 0
-    if isinstance(tree, list) or isinstance(tree, set):
-        count += len(tree)
-    else:  # assuming dictionary
-        for key in tree:
-            count += count_leaves(tree[key])
-    return count
+from .Congress.congress.core import Congress
+from .utils import compose_error_entry
+from .apidata import get_law_text
 
 
 def get_public_law_number(phrase):
-    import re
     pattern = r"Became Public Law No: [\d]+-([\d]+)."
     re_match = re.match(pattern, phrase)
     if re_match is not None:
@@ -31,77 +28,107 @@ def get_public_law_number(phrase):
         return None
 
 
+def download_public_law(bill, client, billtext_error_log):
+    latest_action = bill['latestAction']['text']
+    if "became public law" in latest_action.lower():
+        try:
+            congress_number = bill['congress']
+            bill_type = bill['type']
+            bill_number = bill['number']
+            law_number = get_public_law_number(latest_action)
+            bill_title = f"{bill['title']} {congress_number}_{law_number}"
+            get_law_text(
+                congress_number,
+                law_number,
+                bill_title,
+                bill_type,
+                bill_number,
+                client,
+                "Public Laws"
+            )
+        except Exception:
+            # Log error to a json file
+            error_entry = compose_error_entry(
+                message=tb.format_exc(),
+                bill=bill
+            )
+            billtext_error_log.append(error_entry)
+
+
+def get_list_of_bills(client, OFFSET, LIMIT, requests_error_log):
+    errored_out = False
+    try:
+        response = loads(
+            client.bill(
+                offset=OFFSET,
+                limit=LIMIT,
+                throttle=True
+            )
+        )
+    except Exception:
+        error_entry = compose_error_entry(
+            message=tb.format_exc(),
+            offset=OFFSET,
+            limit=LIMIT
+        )
+        requests_error_log.append(error_entry)
+        errored_out = True
+        response = None
+
+    return response, errored_out
+
+
+def download_public_law_after_date(earliest_date, bill, client, billtext_error_log):
+    passed_earliest_date = False
+    latest_action_date = datetime.strptime(
+        bill['latestAction']['actionDate'],
+        "%Y-%m-%d"
+    )
+    if latest_action_date > earliest_date:
+        download_public_law(bill, client, billtext_error_log)
+    else:
+        passed_earliest_date = True
+
+    return passed_earliest_date
+
+
 def script_to_run():
-    import traceback as tb
-    from json import loads
-    from datetime import datetime
-
-    from .Congress.congress.core import Congress
-    from .apidata import get_law_text
-
     client = Congress()
-    offset = 0
+    OFFSET = 0
+    LIMIT = 250
     search_limit = datetime(1947, 1, 1, 00, 00, 00)
     latest_action_date = datetime.now()
     finished_searching = False
     while_loop_count = 0
+    requests_error_log = []
+    billtext_error_log = []
 
     while not finished_searching:
         while_loop_count += 1
 
         # Query the Congress API
-        LIMIT = 250
-        response = loads(
-            client.bill(
-                offset=offset,
-                limit=LIMIT,
-                throttle=True
+        list_of_bills, errored_out = get_list_of_bills(client, OFFSET, LIMIT, requests_error_log)
+        if errored_out:
+            OFFSET += LIMIT
+            if while_loop_count % 5 == 0:
+                print("Current latest action date: ", latest_action_date)
+            continue
+
+        for bill in list_of_bills['bills']:
+            finished_searching = download_public_law_after_date(
+                search_limit,
+                bill,
+                client,
+                billtext_error_log
             )
-        )
 
-        for bill in response['bills']:
-            latest_action_date = datetime.strptime(
-                bill['latestAction']['actionDate'],
-                "%Y-%m-%d"
-            )
-
-            if latest_action_date > search_limit:
-                latest_action = bill['latestAction']['text']
-                if "became public law" in latest_action.lower():
-                    try:
-                        congress_number = bill['congress']
-                        bill_type = bill['type']
-                        bill_number = bill['number']
-                        law_number = get_public_law_number(latest_action)
-                        bill_title = f"{bill['title']} {congress_number}_{law_number}"
-                        get_law_text(
-                            congress_number,
-                            law_number,
-                            bill_title,
-                            bill_type,
-                            bill_number,
-                            "Public Laws"
-                        )
-                    except Exception:
-                        # Log attributes to a text file
-                        write_to_error_file(f"Exception encountered:{tb.format_exc()}", False)
-                        if 'congress_number' in locals():
-                            write_to_error_file(f"Congress Number: {congress_number}")
-                        if 'bill_type' in locals():
-                            write_to_error_file(f"Bill Type: {bill_type}")
-                        if 'bill_number' in locals():
-                            write_to_error_file(f"Bill Number: {bill_number}")
-                        if 'law_number' in locals():
-                            write_to_error_file(f"Law Number: {law_number}")
-                        if 'bill_title' in locals():
-                            write_to_error_file(f"Bill Title: {bill_title}")
-                        write_to_error_file("\n", False)
-
-            else:
-                finished_searching = True
-                break
-
-        offset += LIMIT
-
+        OFFSET += LIMIT
         if while_loop_count % 5 == 0:
             print("Current latest action date: ", latest_action_date)
+
+    if requests_error_log:
+        with open("error_requests.json", 'w') as file:
+            dump(requests_error_log, file)
+    if billtext_error_log:
+        with open("error_bill_text.json", 'w') as file:
+            dump(billtext_error_log, file)
