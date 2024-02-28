@@ -7,6 +7,9 @@ playground.*
 .vscode/
 FredData/
 Public Laws/
+Public Laws_copy/
+bad_public_laws/
+bad_public_laws2/
 
 ### Python ###
 # Byte-compiled / optimized / DLL files

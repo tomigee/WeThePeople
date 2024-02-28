@@ -62,7 +62,8 @@ def get_law_text(
     law_title,
     bill_type,
     bill_number,
-    write_to_folder=None
+    client,
+    write_to_folder=None,
 ):
 
     def compose_law_url(congress_num, law_num):
@@ -78,25 +79,67 @@ def get_law_text(
         clean_text = strip_tags(response.text)
         return clean_text
 
+    def is_law_text_bad(law_text):
+        # TODO: Find a better way to do this.
+        if law_text is None:
+            return True
+
+        test_string = "Congress.gov | Library of Congress"
+        test_string1 = "Just a moment"
+        law_text_is_bad = (test_string in law_text[:42]) or (test_string1 in law_text[:13])
+        return law_text_is_bad
+
+    def get_bill_file_format(formats):
+        for file_format in formats:
+            if file_format["type"] == "Formatted Text":
+                return "Formatted Text"
+            elif file_format["type"] == "PDF":
+                ans = "PDF"
+            else:
+                ans = None
+        return ans
+
     law_title = process_filename(law_title)
 
     if law_num is not None:
         law_text = get_clean_text(
             compose_law_url(congress_num, law_num)
         )
-
-        # Check if law_text is legit. TODO: Find a better way to do this.
-        test_string = ".main-wrapper {overflow: visible !important;}"
-        if test_string in law_text:
-            # law_text isn't legit. Try another url
-            law_text = get_clean_text(
-                compose_bill_url(congress_num, bill_type, bill_number)
-            )
-
     else:
         law_text = get_clean_text(
             compose_bill_url(congress_num, bill_type, bill_number)
         )
+
+    # Check if law_text is legit.
+    law_text_is_bad = is_law_text_bad(law_text)
+
+    if law_text_is_bad:  # Get bill file format
+        res = loads(client.bill(f"{congress_num}/{bill_type}/{bill_number}/text", throttle=True))
+        bill_file_format = None
+        for text_version in res["textVersions"]:
+            if text_version["type"] == "Enrolled Bill":
+                bill_file_format = get_bill_file_format(text_version["formats"])
+                break
+
+    retries = 0
+    while law_text_is_bad and retries < 3:  # law_text isn't legit; try bill text
+        if bill_file_format == "Formatted Text":  # if formatted text exists
+            law_text = get_clean_text(
+                compose_bill_url(congress_num, bill_type, bill_number)
+            )
+
+        # elif bill_file_format == "PDF":
+            # do something, yet to be implemented
+
+        else:
+            break
+
+        law_text_is_bad = is_law_text_bad(law_text)
+        retries += 1
+
+    if law_text_is_bad:
+        # error out
+        raise ValueError("Bad API Response")
 
     # Write to file or return
     if write_to_folder is None:

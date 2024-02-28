@@ -105,9 +105,13 @@ def json_to_csv(json_structured_obj, filepath, memory_efficient=False):
                 file.write(str_to_write + "\n")
 
 
-def write_to_error_file(message, newline=True):
-    with open("error_log.txt", "a") as file:
+def write_to_error_file(message, newline=True, error_file_path="error_log.txt"):
+    with open(error_file_path, "a") as file:
         if newline:
             file.write(message + "\n")
         else:
             file.write(message)
+
+
+def compose_error_entry(**kwargs):
+    return kwargs
