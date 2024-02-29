@@ -37,7 +37,7 @@ for request in error_requests:
         continue
 
     for bill in list_of_bills['bills']:
-        finished_searching = download_public_law_after_date(
+        finished_searching, _ = download_public_law_after_date(
             search_limit,
             bill,
             client,
