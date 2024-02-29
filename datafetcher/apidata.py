@@ -150,7 +150,7 @@ def get_law_text(
             file_path = truncate_filepath(file_path)
         folder_path = path.join(os.getcwd(), write_to_folder)
         if not path.exists(folder_path):
-            os.mkdir(folder_path)
+            os.makedirs(folder_path)
 
         with open(file_path, 'w') as file:
             file.write(law_text)

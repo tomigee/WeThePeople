@@ -36,7 +36,8 @@ def download_public_law(bill, client, billtext_error_log):
             bill_type = bill['type']
             bill_number = bill['number']
             law_number = get_public_law_number(latest_action)
-            bill_title = f"{bill['title']} {congress_number}_{law_number}"
+            bill_title = f"{congress_number}-{law_number}"
+            data_folder_name = bill['latestAction']['actionDate'] + "_" + bill_title
             get_law_text(
                 congress_number,
                 law_number,
@@ -44,7 +45,7 @@ def download_public_law(bill, client, billtext_error_log):
                 bill_type,
                 bill_number,
                 client,
-                "Public Laws"
+                f"Public Laws/{data_folder_name}"
             )
         except Exception:
             # Log error to a json file
@@ -89,7 +90,7 @@ def download_public_law_after_date(earliest_date, bill, client, billtext_error_l
     else:
         passed_earliest_date = True
 
-    return passed_earliest_date
+    return passed_earliest_date, latest_action_date
 
 
 def script_to_run():
@@ -115,7 +116,7 @@ def script_to_run():
             continue
 
         for bill in list_of_bills['bills']:
-            finished_searching = download_public_law_after_date(
+            finished_searching, latest_action_date = download_public_law_after_date(
                 search_limit,
                 bill,
                 client,
