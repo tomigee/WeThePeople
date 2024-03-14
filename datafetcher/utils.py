@@ -1,4 +1,5 @@
 from io import StringIO
+from json import dump
 from html.parser import HTMLParser
 
 
@@ -28,6 +29,15 @@ def strip_tags(html):
 
 
 def process_filename(filename):
+    """
+    Removes forbidden characters "/" and ":" from filename
+
+    Args:
+        filename (str): Filename to search for forbidden characters
+
+    Returns:
+        str: Filename with forbidden characters replaced by whitespace
+    """
     file_name = filename
     forbidden_chars = ["/", ":"]
     for char in forbidden_chars:
@@ -105,12 +115,21 @@ def json_to_csv(json_structured_obj, filepath, memory_efficient=False):
                 file.write(str_to_write + "\n")
 
 
-def write_to_error_file(message, newline=True, error_file_path="error_log.txt"):
-    with open(error_file_path, "a") as file:
-        if newline:
-            file.write(message + "\n")
-        else:
-            file.write(message)
+def write_error_files(kwargs):
+    """
+    Writes error files to disk
+
+    Args:
+        kwargs (dict, optional): Dictionary of key, value pairs where key will become the name of
+        the file and value will be the data written to the file
+
+    Returns:
+        None
+    """
+    for key, value in kwargs.items():
+        if value:
+            with open(key, 'w') as file:
+                dump(value, file)
 
 
 def compose_error_entry(**kwargs):
