@@ -2,7 +2,7 @@ import tensorflow as tf
 from tensorflow.keras import layers
 import tensorflow_text as tfText
 
-from transformers import TFBertModel
+from transformers import TFBertModel, TFDistilBertModel
 import numpy as np
 
 
@@ -159,17 +159,40 @@ class BertEncoder(layers.Layer):
         self.tokenizer = MyBertTokenizer()
         if max_seq_length:
             self.bert = TFBertModel.from_pretrained(
-                "distilbert/distilbert-base-uncased",
+                "google-bert/bert-base-uncased",
                 max_position_embeddings=max_seq_length,
                 ignore_mismatched_sizes=True
             )
         else:
             self.bert = TFBertModel.from_pretrained(
-                "distilbert/distilbert-base-uncased")
+                "google-bert/bert-base-uncased")
         self.broadcaster = layers.Dense(units=projection_dim)
 
     def call(self, input):
         x = self.tokenizer(input)
         x = self.bert(**x)
         x = tf.expand_dims(self.broadcaster(x.pooler_output), 1)
+        return x
+
+
+class DistilBertEncoder(layers.Layer):
+    def __init__(self, projection_dim, max_seq_length=None):
+        super().__init__()
+        self.tokenizer = MyBertTokenizer()
+        if max_seq_length:
+            self.bert = TFDistilBertModel.from_pretrained(
+                "distilbert/distilbert-base-uncased",
+                max_position_embeddings=max_seq_length,
+                ignore_mismatched_sizes=True
+            )
+        else:
+            self.bert = TFDistilBertModel.from_pretrained(
+                "distilbert/distilbert-base-uncased")
+        self.broadcaster = layers.Dense(units=projection_dim)
+
+    def call(self, input):
+        x = self.tokenizer(input)
+        x.pop("token_type_ids")
+        x = self.bert(**x)
+        x = self.broadcaster(x.last_hidden_state)
         return x

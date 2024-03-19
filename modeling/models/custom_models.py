@@ -5,7 +5,7 @@ from tensorflow.keras import layers
 
 from tqdm import tqdm
 
-from custom_layers import BertEncoder, MyCustomDecoder, PositionalEncoder
+from .custom_layers import MyCustomDecoder, PositionalEncoder, DistilBertEncoder
 
 os.environ["TF_CPP_MIN_LOG_LEVEL"] = "2"
 
@@ -18,8 +18,9 @@ class MyCustomModel(keras.Model):
                  n_decoder_vocab,
                  label_seq_length):
         super().__init__()
-        self.encoder = BertEncoder(d_model)
-        self.decoder = MyCustomDecoder(decoder_stack_height,
+        self.encoder = DistilBertEncoder(d_model)
+        self.decoder = MyCustomDecoder(d_model,
+                                       decoder_stack_height,
                                        d_model,
                                        h_model,
                                        decoder_dropout_rate)
