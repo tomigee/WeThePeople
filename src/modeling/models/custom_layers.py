@@ -105,12 +105,12 @@ class MyCustomDecoderLayer(layers.Layer):
 
     def call(self, inputs, context):
         x = self.msa(inputs)
-        x = self.ca(x, context)
+        x = self.ca(x, context)  # x returned here is dim 203
         x = self.ffn(x)
         return x
 
 
-class MyCustomDecoder(layers.Layer):
+class MyCustomSimpleDecoder(layers.Layer):
     def __init__(self, output_dim, stack_height, d_model, h_model, dropout_rate):
         super().__init__()
         self.stack_height = stack_height
@@ -121,6 +121,28 @@ class MyCustomDecoder(layers.Layer):
                                                     d_model,
                                                     int(d_model/h_model),
                                                     int(d_model/h_model),
+                                                    dropout_rate,
+                                                    dropout_rate)
+                               for _ in range(stack_height)]
+
+    def call(self, input, context):
+        x = input
+        for decoder_layer in self.decoder_layers:
+            x = decoder_layer(x, context)
+        return x
+
+
+class MyCustomDecoder(layers.Layer):
+    def __init__(self, output_dim, stack_height, d_keys, d_values, h_model, dropout_rate):
+        super().__init__()
+        self.stack_height = stack_height
+        self.decoder_layers = [MyCustomDecoderLayer(output_dim,
+                                                    h_model,
+                                                    h_model,
+                                                    d_keys,
+                                                    d_keys,
+                                                    d_values,
+                                                    d_values,
                                                     dropout_rate,
                                                     dropout_rate)
                                for _ in range(stack_height)]
@@ -144,6 +166,29 @@ class MyBertTokenizer(layers.Layer):
         tokenized = self.tokenizer.tokenize(
             tf.strings.lower(inputs)).merge_dims(-2, -1)
         processed_segments, segment_ids = tfText.combine_segments([tokenized],
+                                                                  MyBertTokenizer.START_TOKEN,
+                                                                  MyBertTokenizer.END_TOKEN)
+        processed_segments = tf.cast(
+            processed_segments.to_tensor(), dtype=tf.int32)
+        segment_ids = tf.cast(segment_ids.to_tensor(), dtype=tf.int32)
+        return {'input_ids': processed_segments,
+                'token_type_ids': segment_ids}
+
+
+class MyBertTokenizerTrimmed(layers.Layer):
+    START_TOKEN = 101
+    END_TOKEN = 102
+
+    def __init__(self, max_seq_len):
+        super().__init__()
+        self.tokenizer = tfText.BertTokenizer("datasets/Bert_Vocabulary.txt")
+        self.trimmer = tfText.RoundRobinTrimmer(max_seq_length=max_seq_len)
+
+    def call(self, inputs):
+        tokenized = self.tokenizer.tokenize(
+            tf.strings.lower(inputs)).merge_dims(-2, -1)
+        trimmed = self.trimmer.trim([tokenized])
+        processed_segments, segment_ids = tfText.combine_segments(trimmed,
                                                                   MyBertTokenizer.START_TOKEN,
                                                                   MyBertTokenizer.END_TOKEN)
         processed_segments = tf.cast(
@@ -178,14 +223,15 @@ class BertEncoder(layers.Layer):
 class DistilBertEncoder(layers.Layer):
     def __init__(self, projection_dim, max_seq_length=None):
         super().__init__()
-        self.tokenizer = MyBertTokenizer()
         if max_seq_length:
+            self.tokenizer = MyBertTokenizerTrimmed(max_seq_length)
             self.bert = TFDistilBertModel.from_pretrained(
                 "distilbert/distilbert-base-uncased",
                 max_position_embeddings=max_seq_length,
                 ignore_mismatched_sizes=True
             )
         else:
+            self.tokenizer = MyBertTokenizer()
             self.bert = TFDistilBertModel.from_pretrained(
                 "distilbert/distilbert-base-uncased")
         self.broadcaster = layers.Dense(units=projection_dim)

@@ -1,0 +1,151 @@
+{
+    "NIPA": {
+        "required": [
+            "Year",
+            "Frequency",
+            "TableName"
+        ],
+        "all": [
+            "Year",
+            "Frequency",
+            "TableName"
+        ]
+    },
+    "NIUnderlyingDetail": {
+        "required": [
+            "Year",
+            "Frequency"
+        ],
+        "all": [
+            "Year",
+            "Frequency",
+            "TableName"
+        ]
+    },
+    "FixedAssets": {
+        "required": [
+            "Year",
+            "TableName"
+        ],
+        "all": [
+            "Year",
+            "TableName"
+        ]
+    },
+    "MNE": {
+        "DI": {
+            "required": [
+                "DirectionOfInvestment",
+                "Classification",
+                "Year"
+            ],
+            "all": [
+                "DirectionOfInvestment",
+                "Classification",
+                "Year",
+                "SeriesID",
+                "Country",
+                "Industry",
+                "GetFootnotes"
+            ]
+        },
+        "AMNE": {
+            "required": [
+                "DirectionOfInvestment",
+                "Classification",
+                "Year",
+                "OwnershipLevel",
+                "NonBankAffiliatesOnly"
+            ]
+        }
+    },
+    "GDPbyIndustry": {
+        "required": [
+            "TableID",
+            "Frequency",
+            "Year",
+            "Industry"
+        ],
+        "all": [
+            "TableID",
+            "Frequency",
+            "Year",
+            "Industry"
+        ]
+    },
+    "ITA": {
+        "required": [],
+        "all": [
+            "Indicator",
+            "AreaOrCountry",
+            "Frequency",
+            "Year"
+        ]
+    },
+    "IIP": {
+        "required": [],
+        "all": [
+            "TypeOfInvestment",
+            "Component",
+            "Frequency",
+            "Year"
+        ]
+    },
+    "InputOutput": {
+        "required": [
+            "TableID",
+            "Year"
+        ],
+        "all": [
+            "TableID",
+            "Year"
+        ]
+    },
+    "UnderlyingGDPbyIndustry": {
+        "required": [
+            "TableID",
+            "Frequency",
+            "Year",
+            "Industry"
+        ],
+        "all": [
+            "TableID",
+            "Frequency",
+            "Year",
+            "Industry"
+        ]
+    },
+    "IntlServTrade": {
+        "required": [],
+        "all": [
+            "TypeOfService",
+            "TradeDirection",
+            "Affiliation",
+            "AreaOrCountry",
+            "Year"
+        ]
+    },
+    "Regional": {
+        "required": [
+            "TableName",
+            "LineCode",
+            "GeoFips"
+        ],
+        "all": [
+            "TableName",
+            "LineCode",
+            "GeoFips",
+            "Year"
+        ]
+    },
+    "IntlServSTA": {
+        "required": [],
+        "all": [
+            "Channel",
+            "Destination",
+            "Industry",
+            "AreaOrCountry",
+            "Year"
+        ]
+    }
+}
