@@ -1,21 +1,36 @@
 import os
 import tensorflow as tf
 from tensorflow.keras import layers
+import horovod.tensorflow.keras as hvd
 
 import numpy as np
 import re
 
 
+def calculate_steps_per_epoch(n_total_examples, n_workers, test_split, local_batch_size):
+    min_shard_size = n_total_examples // n_workers
+    divisor = round(100/test_split)
+    n_test_examples = -(-min_shard_size//divisor)  # ceiling division
+    n_train_examples = min_shard_size - n_test_examples
+    steps_per_epoch = n_train_examples // local_batch_size
+    return steps_per_epoch
+
+
 def get_training_data(path, fred_series_id, return_filepaths):
     data_folder = os.path.basename(path)
+    fred_series_folder = os.path.join(path, fred_series_id)  # untested
     pattern = r".+_(.+)"
     matches = re.match(pattern, data_folder)
     prefix = matches.group(1)
     x1_filepath = os.path.join(path, prefix + ".txt")
-    x2_filepath = os.path.join(
-        path, fred_series_id, fred_series_id + "_series.csv")
-    y_filepath = os.path.join(path, fred_series_id,
-                              fred_series_id + "_label.csv")
+    if os.path.exists(fred_series_folder):  # untested
+        x2_filepath = os.path.join(
+            fred_series_folder, fred_series_id + "_series.csv")
+        y_filepath = os.path.join(fred_series_folder,
+                                  fred_series_id + "_label.csv")
+    else:
+        x2_filepath = None
+        y_filepath = None
     paths = [x1_filepath, x2_filepath, y_filepath]
 
     if return_filepaths:
@@ -23,7 +38,10 @@ def get_training_data(path, fred_series_id, return_filepaths):
     else:
         file_contents = []
         for path in paths:
-            file_contents.append(tf.io.read_file(path))
+            if path:
+                file_contents.append(tf.io.read_file(path))
+            else:
+                file_contents.append(None)
         return file_contents
 
 
@@ -106,13 +124,20 @@ def compile_training_data(training_data_folder,
                           label_seq_length,
                           n_vocab,
                           num_threads,
-                          batch_size):
+                          local_batch_size,
+                          distributed=None):
+
+    batch_size = local_batch_size
+    test_split = 20
     # Get folders that are valid training examples
     training_example_folders = []
     for folder in os.listdir(training_data_folder):
         path = os.path.join(training_data_folder, folder)
         if os.path.isdir(path):
             training_example_folders.append(path)
+
+    if distributed:
+        training_example_folders.sort()  # for repeatability across shards
 
     # Get feature and label filepaths from valid training example folders
     data_filepaths = {"billtext": [],
@@ -121,14 +146,24 @@ def compile_training_data(training_data_folder,
     for training_example in training_example_folders:
         x1, x2, y = get_training_data(
             training_example, fred_series_id, return_filepaths=True)
-        data_filepaths["billtext"].append(x1)
-        data_filepaths["series"].append(x2)
-        data_filepaths["label"].append(y)
+        if (x2 is not None) and (y is not None):
+            data_filepaths["billtext"].append(x1)
+            data_filepaths["series"].append(x2)
+            data_filepaths["label"].append(y)
+    n_total_examples = len(data_filepaths["label"])
+
+    steps_per_epoch = calculate_steps_per_epoch(
+        n_total_examples, hvd.size(), test_split, batch_size
+    )
 
     # Hark! A pipeline!
     for key in data_filepaths:
         data_filepaths[key] = tf.data.Dataset.from_tensor_slices(
             data_filepaths[key])
+
+        if distributed == "horovod":
+            data_filepaths[key] = data_filepaths[key].shard(
+                hvd.size(), hvd.rank())
 
     # Do dataset mappings
     my_tokenizer = layers.IntegerLookup(
@@ -155,9 +190,20 @@ def compile_training_data(training_data_folder,
     # Zip
     training_data = tf.data.Dataset.zip(
         (data["billtext"], data["series"]), data["label"])
+
+    # Custom logic for distributed training
+    if distributed == "tf":
+        # Recalculate batch size
+        # batch_size = local_batch_size * num_workers
+        pass
+    if distributed == "horovod":
+        pass
+    else:
+        pass
+
     train_data, test_data = get_train_test_split(
-        20,
+        test_split,
         training_data,
         batch_size=batch_size, num_parallel_calls=num_threads
     )
-    return train_data, test_data
+    return train_data, test_data, steps_per_epoch

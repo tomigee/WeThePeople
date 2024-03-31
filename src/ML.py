@@ -5,8 +5,12 @@ import json
 import joblib
 import logging
 import sys
+from time import sleep
 
 # Imports
+import horovod.tensorflow.keras as hvd
+import tensorflow as tf
+from tensorflow import distribute
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import losses
 
@@ -23,7 +27,7 @@ def parse_args():
     # Hyperparameters and algorithm parameters are described here
     parser.add_argument("--fred_series_id", type=str, default="GDPC1")
     parser.add_argument("--num_threads", type=int, default=8)
-    parser.add_argument("--batch_size", type=int, default=1)
+    parser.add_argument("--batch_size_per_worker", type=int, default=1)
     parser.add_argument("--n_vocab", type=int, default=100000)
     parser.add_argument("--label_seq_length", type=int, default=20)
     parser.add_argument("--series_seq_length", type=int, default=40)
@@ -35,87 +39,251 @@ def parse_args():
     parser.add_argument("--encoder_max_seq_len", type=int, default=512)
     parser.add_argument("--epochs", type=int, default=1)
     parser.add_argument("--learning_rate", type=float, default=1e-3)
+    parser.add_argument("--distributed", type=str, default=None)
 
     # Location where trained model will be stored. Default set by SageMaker, /opt/ml/model
-    parser.add_argument("--model_dir", type=str, default=os.environ.get("SM_MODEL_DIR"))
+    parser.add_argument("--model_dir", type=str,
+                        default=os.environ.get("SM_MODEL_DIR"))
     # Location of input training data
-    parser.add_argument("--train_data_dir", type=str, default=os.environ.get("SM_CHANNEL_TRAIN"))
+    parser.add_argument("--train_data_dir", type=str,
+                        default=os.environ.get("SM_CHANNEL_TRAIN"))
     # Location where model artifacts will be stored. Default set by SageMaker, /opt/ml/output/data
-    parser.add_argument("--output_data_dir", type=str, default=os.environ.get("SM_OUTPUT_DATA_DIR"))
+    parser.add_argument("--output_data_dir", type=str,
+                        default=os.environ.get("SM_OUTPUT_DATA_DIR"))
 
     args = parser.parse_args()
     return args
 
 
-def setup():
-    # AWS: Virtual Env & Pip installs
-    os.system("python -m venv .venv")
-    os.system("source .venv/bin/activate")
-    os.system("pip install --upgrade pip")
-    os.system("pip install -r requirements.txt")
+def setup(distributed=None):
+    if distributed:
+        # Distributed training stuff
+        if distributed == "tf":
+            def set_tf_config(max_retries=3):
+                os.environ.pop('TF_CONFIG', None)
+                retries = 0
+                while retries < max_retries:
+                    try:
+                        with open("/opt/ml/input/config/resourceconfig.json", 'r') as file:
+                            node_config = json.load(file)
+                            break
+                    except Exception:
+                        retries += 1
+                        sleep(5)
+
+                list_of_workers = node_config['hosts']
+                port = "12345"  # hard-coded
+                for i in range(len(list_of_workers)):
+                    list_of_workers[i] = list_of_workers[i] + ":" + port
+                current_worker = node_config['current_host']
+                tf_config = {
+                    'cluster': {
+                        'worker': list_of_workers
+                    },
+                    'task': {'type': 'worker', 'index': list_of_workers.index(
+                        current_worker + ":" + port
+                    )
+                    }
+                }
+                os.environ['TF_CONFIG'] = json.dumps(tf_config)
+                return tf_config
+
+            # TODO: Move to requirements.txt
+            os.system("pip install tf-nightly")
+            tf_config = set_tf_config()
+            num_workers = len(tf_config['cluster']['worker'])
+            print(f"Number of workers: {num_workers}")
+            return num_workers
+
+        elif distributed == "horovod":
+            hvd.init()
+            gpus = tf.config.experimental.list_physical_devices('GPU')
+            for gpu in gpus:
+                tf.config.experimental.set_memory_growth(gpu, True)
+            if gpus:
+                tf.config.experimental.set_visible_devices(
+                    gpus[hvd.local_rank()], 'GPU')
+            return hvd.size()
+
+    return 1
 
 
-def script_to_run(args):
+def script_to_run(args, num_workers):
 
+    # Setup save directories
+    model_dir = os.environ.get("SM_MODEL_DIR")
+    logs_location = f"{args.output_data_dir}/logs"
+    if not os.path.exists(logs_location):
+        os.makedirs(logs_location)
+    # is there an environment variable for this?
+    checkpoint_dir = "/opt/ml/checkpoints"
+    checkpoint_filename = "{epoch:02d}-{loss:.2f}.keras"
+    if not os.path.exists(checkpoint_dir):
+        os.makedirs(checkpoint_dir)
+
+    # Setup logger (for AWS tuning)
     logger = logging.getLogger(__name__)
     logger.setLevel(logging.DEBUG)
     logger.addHandler(logging.StreamHandler(sys.stdout))
 
-    # Set input pipeline hyperparameters - User customizable
-    pipeline_hparams = {
-        "training_data_folder": args.train_data_dir,
-        "fred_series_id": args.fred_series_id,
-        "series_seq_length": args.series_seq_length,
-        "label_seq_length": args.label_seq_length,
-        "n_vocab": args.n_vocab,
-        "num_threads": args.num_threads,
-        "batch_size": args.batch_size
-    }
+    def execute_training_routine(args):
+        def initialize_model(model_hparams):
+            return MyCustomModel1(**model_hparams)
 
-    # Set model hyperparameters - User customizable
-    model_hparams = {
-        "decoder_stack_height": args.stack_height,
-        "d_values": args.d_values,
-        "d_keys": args.d_keys,
-        "h_model": args.num_heads,
-        "decoder_dropout_rate": args.dropout_rate,
-        "n_decoder_vocab": args.n_vocab,
-        "label_seq_length": args.label_seq_length,
-        "encoder_max_seq_len": args.encoder_max_seq_len
-    }
+        def get_training_options(train_hparams):
 
-    # Set training hyperparameters - User customizable
-    train_hparams = {
-        "learning_rate": args.learning_rate,
-        "epochs": args.epochs
-    }
+            config = {}
+            config["optimizer"] = Adam(
+                learning_rate=train_hparams["learning_rate"])
+            config["loss"] = losses.MeanSquaredError()
+            config["metrics"] = ['mse', 'mape', 'mae']
+            config["verbose"] = 2
+            config["steps_per_epoch"] = None
+            config["epochs"] = train_hparams["epochs"]
+            config["callbacks"] = None
+            return config
 
-    train_data, test_data = compile_training_data(**pipeline_hparams)
+        def compile_model(model, opts, distributed):
+            compile_keys = ['optimizer', 'loss', 'metrics']
+            compile_opts = {key: opts[key] for key in compile_keys}
+            if distributed == "tf":
+                pass
+            elif distributed == "horovod":
+                compile_opts["experimental_run_tf_function"] = False
+                compile_opts["optimizer"] = hvd.DistributedOptimizer(
+                    compile_opts["optimizer"],
+                    backward_passes_per_step=1,
+                    average_aggregated_gradients=True
+                )
+            else:
+                pass
 
-    my_model = MyCustomModel1(**model_hparams)
-    my_model.compile(optimizer=Adam(learning_rate=train_hparams["learning_rate"]),
-                     loss=losses.MeanSquaredError(),
-                     metrics=['mse'])
-    my_model.fit(train_data, epochs=train_hparams["epochs"], verbose=2)
-    output = my_model.evaluate(test_data)
-    metrics_data = {}
-    for i in range(len(my_model.metrics_names)):
-        logger.info(f"{my_model.metrics_names[i]}: {output[i]}")  # metric for the AWS tuner
-        metrics_data[my_model.metrics_names[i]] = output[i]
+            model.compile(**compile_opts)
 
-    metrics_location = f"{args.output_data_dir}/metrics.json"
-    model_location = f"{args.model_dir}/model"
+        def fit_model(train_data,
+                      model,
+                      opts,
+                      train_hparams,
+                      steps_per_epoch):
+            fit_keys = ['verbose', 'epochs', 'steps_per_epoch', 'callbacks']
+            fit_opts = {key: opts[key] for key in fit_keys}
+            if train_hparams["distributed"] == "tf":
+                pass  # populate when you figure out tf distributed
+            elif train_hparams["distributed"] == "horovod":
+                fit_opts["steps_per_epoch"] = steps_per_epoch  # noqa: E501
+                fit_opts["callbacks"] = [
+                    hvd.callbacks.BroadcastGlobalVariablesCallback(0),
+                    hvd.callbacks.MetricAverageCallback(),
+                    hvd.callbacks.LearningRateWarmupCallback(
+                        initial_lr=train_hparams["learning_rate"], warmup_epochs=3, verbose=1
+                    )
+                ]
+                if hvd.rank() == 0:
+                    fit_opts["callbacks"].append(tf.keras.callbacks.ModelCheckpoint(
+                        os.path.join(checkpoint_dir, checkpoint_filename),
+                        save_best_only=True
+                    )
+                    )
+                    fit_opts["callbacks"].append(
+                        tf.keras.callbacks.TensorBoard(log_dir=train_hparams["logs_location"]))
+                    fit_opts["verbose"] = 2
+                else:
+                    fit_opts["verbose"] = 0
+            else:
+                fit_opts["callbacks"] = [
+                    tf.keras.callbacks.TensorBoard(
+                        log_dir=train_hparams["logs_location"])
+                ]
 
-    with open(metrics_location, "w") as f:
-        json.dump(metrics_data, f)
+            model.fit(train_data, **fit_opts)
 
-    if not os.path.exists(args.model_dir):
-        os.makedirs(args.model_dir)
-    with open(model_location, "wb") as f:
-        joblib.dump(my_model, f)
+        def log_and_save_data(model, test_data, train_hparams):
+            def log_metrics():
+                metrics_data = {}
+                for i in range(len(model.metrics_names)):
+                    # metric for the AWS tuner
+                    logger.info(
+                        f"{model.metrics_names[i]}: {evaluation_results[i]}")
+                    metrics_data[model.metrics_names[i]
+                                 ] = evaluation_results[i]
+                return metrics_data
+
+            def save_data(metrics_data):
+                # Save artifacts
+                with open(train_hparams["metrics_location"], "w") as f:
+                    json.dump(metrics_data, f)
+                model_location = train_hparams["model_dir"] + "/model.keras"
+                model.save(model_location)
+                # with open(model_location, "wb") as f:
+                #     joblib.dump(model, f)
+
+            evaluation_results = model.evaluate(test_data)
+            if train_hparams["distributed"] == "tf":
+                # Change this code once you figure out tf.distribute
+                metrics_data = log_metrics()
+                save_data(metrics_data)
+            elif train_hparams["distributed"] == "horovod":
+                if hvd.rank() == 0:
+                    metrics_data = log_metrics()
+                    save_data(metrics_data)
+            else:
+                metrics_data = log_metrics()
+                save_data(metrics_data)
+
+        model_hparams = {
+            "decoder_stack_height": args.stack_height,
+            "d_values": args.d_values,
+            "d_keys": args.d_keys,
+            "h_model": args.num_heads,
+            "decoder_dropout_rate": args.dropout_rate,
+            "n_decoder_vocab": args.n_vocab,
+            "label_seq_length": args.label_seq_length,
+            "encoder_max_seq_len": args.encoder_max_seq_len
+        }
+
+        pipeline_hparams = {
+            "training_data_folder": args.train_data_dir,
+            "fred_series_id": args.fred_series_id,
+            "series_seq_length": args.series_seq_length,
+            "label_seq_length": args.label_seq_length,
+            "n_vocab": args.n_vocab,
+            "num_threads": args.num_threads,
+            "local_batch_size": args.batch_size_per_worker,
+            "distributed": args.distributed
+        }
+
+        train_hparams = {
+            "learning_rate": args.learning_rate * num_workers,
+            "epochs": args.epochs,
+            "distributed": args.distributed,
+            "model_dir": model_dir,
+            "logs_location": logs_location,
+            "metrics_location": f"{args.output_data_dir}/metrics.json"
+        }
+
+        train_data, test_data, steps_per_epoch = compile_training_data(
+            **pipeline_hparams
+        )
+
+        if train_hparams["distributed"] == "tf":
+            strategy = distribute.MultiWorkerMirroredStrategy()
+            with strategy.scope():
+                my_model = initialize_model(model_hparams)
+                opts = get_training_options(train_hparams)
+                compile_model(my_model, opts, train_hparams["distributed"])
+            fit_model(train_data, my_model, opts, train_hparams, steps_per_epoch)
+            log_and_save_data(my_model, test_data, train_hparams)
+        else:
+            my_model = initialize_model(model_hparams)
+            opts = get_training_options(train_hparams)
+            compile_model(my_model, opts, train_hparams["distributed"])
+            fit_model(train_data, my_model, opts, train_hparams, steps_per_epoch)
+            log_and_save_data(my_model, test_data, train_hparams)
+
+    execute_training_routine(args)
 
 
 if __name__ == "__main__":
     args = parse_args()
-    setup()
-    script_to_run(args)
+    num_workers = setup(args.distributed)
+    script_to_run(args, num_workers)
