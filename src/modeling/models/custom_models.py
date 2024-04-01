@@ -24,6 +24,13 @@ class MyCustomModel(keras.Model):
                  label_seq_length,
                  encoder_max_seq_len):
         super().__init__()
+        self.decoder_stack_height = decoder_stack_height
+        self.d_model = d_model
+        self.h_model = h_model
+        self.decoder_dropout_rate = decoder_dropout_rate
+        self.n_decoder_vocab = n_decoder_vocab
+        self.label_seq_length = label_seq_length
+        self.encoder_max_seq_len = encoder_max_seq_len
         self.encoder = DistilBertEncoder(d_model, encoder_max_seq_len)
         self.decoder = MyCustomSimpleDecoder(d_model,
                                              decoder_stack_height,
@@ -57,6 +64,21 @@ class MyCustomModel(keras.Model):
 
         return x
 
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "decoder_stack_height ": self.decoder_stack_height,
+                "d_model": self.d_model,
+                "h_model": self.h_model,
+                "decoder_dropout_rate": self.decoder_dropout_rate,
+                "n_decoder_vocab": self.n_decoder_vocab,
+                "label_seq_length": self.label_seq_length,
+                "encoder_max_seq_len": self.encoder_max_seq_len
+            }
+        )
+        return config
+
 
 class MyCustomModel1(keras.Model):
     def __init__(self,
@@ -67,18 +89,29 @@ class MyCustomModel1(keras.Model):
                  label_seq_length,
                  encoder_max_seq_len):
         super().__init__()
-        self.encoder = DistilBertEncoder(d_values, encoder_max_seq_len)
-        self.decoder = MyCustomDecoder(d_values,
-                                       decoder_stack_height,
-                                       d_keys,
-                                       d_values,
-                                       h_model,
-                                       decoder_dropout_rate)
-        self.embedding = layers.Embedding(n_decoder_vocab+1, d_values)
-        self.positional_encoding = PositionalEncoder(d_values)
+        self.decoder_stack_height = decoder_stack_height
+        self.d_keys = d_keys
+        self.d_values = d_values
+        self.h_model = h_model
+        self.decoder_dropout_rate = decoder_dropout_rate
+        self.n_decoder_vocab = n_decoder_vocab
+        self.label_seq_length = label_seq_length
+        self.encoder_max_seq_len = encoder_max_seq_len
+
+        self.encoder = DistilBertEncoder(
+            self.d_values, self.encoder_max_seq_len)
+        self.decoder = MyCustomDecoder(self.d_values,
+                                       self.decoder_stack_height,
+                                       self.d_keys,
+                                       self.d_values,
+                                       self.h_model,
+                                       self.decoder_dropout_rate)
+        self.embedding = layers.Embedding(
+            self.n_decoder_vocab+1, self.d_values)
+        self.positional_encoding = PositionalEncoder(self.d_values)
         # self.output_layer = layers.Dense(units=n_decoder_vocab+1)
         self.output_layer = layers.Dense(units=1)
-        self.output_seq_length = label_seq_length
+        self.output_seq_length = self.label_seq_length
 
     def call(self, input):
         # Input is a tuple
@@ -101,3 +134,19 @@ class MyCustomModel1(keras.Model):
         x = self.output_layer(x)
 
         return x
+
+    def get_config(self):
+        config = super().get_config()
+        config.update(
+            {
+                "decoder_stack_height ": self.decoder_stack_height,
+                "d_keys": self.d_keys,
+                "d_values": self.d_values,
+                "h_model": self.h_model,
+                "decoder_dropout_rate": self.decoder_dropout_rate,
+                "n_decoder_vocab": self.n_decoder_vocab,
+                "label_seq_length": self.label_seq_length,
+                "encoder_max_seq_len": self.encoder_max_seq_len
+            }
+        )
+        return config
