@@ -25,7 +25,7 @@ class PositionalEncoder(layers.Layer):
                            (inputs.shape[1], 1)) % 2 == 0
         cos_mask = np.logical_not(sin_mask)
         output = sin_mask*np.sin(quotient) + cos_mask*np.cos(quotient)
-        return output
+        return output.astype("float32")
 
     def get_config(self):
         config = super().get_config()
@@ -285,10 +285,11 @@ class MyBertTokenizerTrimmed(layers.Layer):
     START_TOKEN = 101
     END_TOKEN = 102
 
-    def __init__(self, max_seq_len):
+    def __init__(self, max_seq_len, vocab_file):
         super().__init__()
         self.max_seq_len = max_seq_len
-        self.tokenizer = tfText.BertTokenizer("datasets/Bert_Vocabulary.txt")
+        self.vocab_file = vocab_file
+        self.tokenizer = tfText.BertTokenizer(self.vocab_file)
         self.trimmer = tfText.RoundRobinTrimmer(
             max_seq_length=self.max_seq_len)
 
@@ -309,7 +310,8 @@ class MyBertTokenizerTrimmed(layers.Layer):
         config = super().get_config()
         config.update(
             {
-                "max_seq_len": self.max_seq_len
+                "max_seq_len": self.max_seq_len,
+                "vocab_file": self.vocab_file
             }
         )
         return config
@@ -330,6 +332,8 @@ class BertEncoder(layers.Layer):
         else:
             self.bert = TFBertModel.from_pretrained(
                 "google-bert/bert-base-uncased")
+
+        self.bert.trainable = False  # freeze pre-trained weights
         self.broadcaster = layers.Dense(units=self.projection_dim)
 
     def call(self, input):
@@ -350,13 +354,15 @@ class BertEncoder(layers.Layer):
 
 
 class DistilBertEncoder(layers.Layer):
-    def __init__(self, projection_dim, max_seq_length=None):
+    def __init__(self, projection_dim, vocab_file, max_seq_length=None):
         super().__init__()
         self.projection_dim = projection_dim
         self.max_seq_length = max_seq_length
+        self.vocab_file = vocab_file
 
         if self.max_seq_length:
-            self.tokenizer = MyBertTokenizerTrimmed(self.max_seq_length)
+            self.tokenizer = MyBertTokenizerTrimmed(
+                self.max_seq_length, self.vocab_file)
             self.bert = TFDistilBertModel.from_pretrained(
                 "distilbert/distilbert-base-uncased",
                 max_position_embeddings=self.max_seq_length,
@@ -366,6 +372,8 @@ class DistilBertEncoder(layers.Layer):
             self.tokenizer = MyBertTokenizer()
             self.bert = TFDistilBertModel.from_pretrained(
                 "distilbert/distilbert-base-uncased")
+
+        self.bert.trainable = False  # freeze pre-trained weights
         self.broadcaster = layers.Dense(units=self.projection_dim)
 
     def call(self, input):
@@ -380,6 +388,7 @@ class DistilBertEncoder(layers.Layer):
         config.update(
             {
                 "projection_dim": self.projection_dim,
+                "vocab_file": self.vocab_file,
                 "max_seq_length": self.max_seq_length
             }
         )

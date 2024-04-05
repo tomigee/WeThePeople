@@ -2,7 +2,6 @@
 import os
 import argparse
 import json
-# import joblib
 import logging
 import sys
 from time import sleep
@@ -20,7 +19,7 @@ from modeling.models.custom_models import MyCustomModel1
 
 # AWS: Parse params
 def parse_args():
-    # example command (create "artifacts" folder before this): python ML.py --model_dir "artifacts" --train_data_dir "datasets/test_training data" --output_data_dir "artifacts"
+    # example command: python ML.py --model_dir "artifacts" --train_data_dir "datasets/test_training data" --output_data_dir "artifacts"
 
     parser = argparse.ArgumentParser()
 
@@ -117,7 +116,7 @@ def script_to_run(args, num_workers):
         os.makedirs(logs_location)
     # is there an environment variable for this?
     checkpoint_dir = "/opt/ml/checkpoints"
-    checkpoint_filename = "{epoch:02d}-{loss:.2f}.keras"
+    checkpoint_filename = "{epoch:02d}-{loss:.2f}.weights.h5"
     if not os.path.exists(checkpoint_dir):
         os.makedirs(checkpoint_dir)
 
@@ -130,7 +129,7 @@ def script_to_run(args, num_workers):
         def initialize_model(model_hparams):
             return MyCustomModel1(**model_hparams)
 
-        def get_training_options(train_hparams):
+        def get_training_options(train_hparams, val_data):
 
             config = {}
             config["optimizer"] = Adam(
@@ -141,6 +140,7 @@ def script_to_run(args, num_workers):
             config["steps_per_epoch"] = None
             config["epochs"] = train_hparams["epochs"]
             config["callbacks"] = None
+            config["validation_data"] = val_data
             return config
 
         def compile_model(model, opts, distributed):
@@ -165,7 +165,7 @@ def script_to_run(args, num_workers):
                       opts,
                       train_hparams,
                       steps_per_epoch):
-            fit_keys = ['verbose', 'epochs', 'steps_per_epoch', 'callbacks']
+            fit_keys = ['verbose', 'epochs', 'steps_per_epoch', 'callbacks', 'validation_data']
             fit_opts = {key: opts[key] for key in fit_keys}
             if train_hparams["distributed"] == "tf":
                 pass  # populate when you figure out tf distributed
@@ -181,7 +181,8 @@ def script_to_run(args, num_workers):
                 if hvd.rank() == 0:
                     fit_opts["callbacks"].append(tf.keras.callbacks.ModelCheckpoint(
                         os.path.join(checkpoint_dir, checkpoint_filename),
-                        save_best_only=True
+                        save_best_only=True,
+                        save_weights_only=True
                     )
                     )
                     fit_opts["callbacks"].append(
@@ -195,27 +196,33 @@ def script_to_run(args, num_workers):
                         log_dir=train_hparams["logs_location"])
                 ]
 
-            model.fit(train_data, **fit_opts)
+            history = model.fit(train_data, **fit_opts)
+            return history
 
-        def log_and_save_data(model, test_data, train_hparams):
+        def log_and_save_data(model, test_data, train_hparams, training_history):
             def log_metrics():
                 metrics_data = {}
-                for i in range(len(model.metrics_names)):
-                    # metric for the AWS tuner
+                # Log training and validation metrics
+                for key in training_history.history:
                     logger.info(
-                        f"{model.metrics_names[i]}: {evaluation_results[i]}")
-                    metrics_data[model.metrics_names[i]
-                                 ] = evaluation_results[i]
+                        f"{key}: {training_history.history[key][-1]}"
+                    )
+                    metrics_data[key] = float(training_history.history[key][-1])
+
+                # Log test metrics
+                for i in range(len(model.metrics_names)):
+                    logger.info(
+                        f"test_{model.metrics_names[i]}: {evaluation_results[i]}"
+                    )
+                    metrics_data[f"test_{model.metrics_names[i]}"] = float(evaluation_results[i])
                 return metrics_data
 
             def save_data(metrics_data):
                 # Save artifacts
                 with open(train_hparams["metrics_location"], "w") as f:
                     json.dump(metrics_data, f)
-                model_location = train_hparams["model_dir"] + "/model.keras"
-                model.save(model_location)
-                # with open(model_location, "wb") as f:
-                #     joblib.dump(model, f)
+                model_location = train_hparams["model_dir"] + "/model"
+                model.save(model_location, save_format='tf')
 
             evaluation_results = model.evaluate(test_data)
             if train_hparams["distributed"] == "tf":
@@ -238,7 +245,8 @@ def script_to_run(args, num_workers):
             "decoder_dropout_rate": args.dropout_rate,
             "n_decoder_vocab": args.n_vocab,
             "label_seq_length": args.label_seq_length,
-            "encoder_max_seq_len": args.encoder_max_seq_len
+            "encoder_max_seq_len": args.encoder_max_seq_len,
+            "vocab_file": args.train_data_dir + "/Bert_Vocabulary.txt"
         }
 
         pipeline_hparams = {
@@ -261,7 +269,7 @@ def script_to_run(args, num_workers):
             "metrics_location": f"{args.output_data_dir}/metrics.json"
         }
 
-        train_data, test_data, steps_per_epoch = compile_training_data(
+        train_data, val_data, test_data, steps_per_epoch = compile_training_data(
             **pipeline_hparams
         )
 
@@ -269,16 +277,16 @@ def script_to_run(args, num_workers):
             strategy = distribute.MultiWorkerMirroredStrategy()
             with strategy.scope():
                 my_model = initialize_model(model_hparams)
-                opts = get_training_options(train_hparams)
+                opts = get_training_options(train_hparams, val_data)
                 compile_model(my_model, opts, train_hparams["distributed"])
-            fit_model(train_data, my_model, opts, train_hparams, steps_per_epoch)
-            log_and_save_data(my_model, test_data, train_hparams)
+            training_history = fit_model(train_data, my_model, opts, train_hparams, steps_per_epoch)
+            log_and_save_data(my_model, test_data, train_hparams, training_history)
         else:
             my_model = initialize_model(model_hparams)
-            opts = get_training_options(train_hparams)
+            opts = get_training_options(train_hparams, val_data)
             compile_model(my_model, opts, train_hparams["distributed"])
-            fit_model(train_data, my_model, opts, train_hparams, steps_per_epoch)
-            log_and_save_data(my_model, test_data, train_hparams)
+            training_history = fit_model(train_data, my_model, opts, train_hparams, steps_per_epoch)
+            log_and_save_data(my_model, test_data, train_hparams, training_history)
 
     execute_training_routine(args)
 
