@@ -48,7 +48,8 @@ def find_date_in_observations(target_date, observations, obs_time_format="%Y-%m-
     start_ind, end_ind = 0, len(observations)
     while start_ind < end_ind-1:
         i = int((start_ind + end_ind)/2)
-        observation_date = datetime.strptime(observations[i]["date"], obs_time_format)
+        observation_date = datetime.strptime(
+            observations[i]["date"], obs_time_format)
         if target_date == observation_date:
             return i
         elif target_date < observation_date:
@@ -82,7 +83,8 @@ def create_feature_and_target_series(
     forward_steps = target_series_timespan//obs_interval
 
     # Find index of separation_date with BST
-    i = find_date_in_observations(separation_date, observations, obs_time_format)
+    i = find_date_in_observations(
+        separation_date, observations, obs_time_format)
 
     # Create feature and target series
     if backward_steps <= i <= len(observations)-forward_steps:
@@ -111,13 +113,13 @@ def get_training_example_info():
     return bill_approval_dates, training_example_paths
 
 
-def script_to_run(n_max_results=1000,
-                  min_popularity=85,
-                  get_series_info_from_Fred=False):
+def get(max_items_per_request=1000,
+        min_popularity=85,
+        get_series_info_from_Fred=False):
     OFFSET = 0
     client = Fred()
-    if n_max_results > 1000:
-        n_max_results = 1000
+    if max_items_per_request > 1000:
+        max_items_per_request = 1000
 
     if get_series_info_from_Fred:
         # Get all tag names
@@ -126,10 +128,11 @@ def script_to_run(n_max_results=1000,
         temp = client.tags(limit=2)
         count = temp["count"]
         while OFFSET < count:
-            temp = client.tags(limit=n_max_results, offset=OFFSET, throttle=True)
+            temp = client.tags(limit=max_items_per_request,
+                               offset=OFFSET, throttle=True)
             for tag in temp['tags']:
                 all_tags.append(tag['name'])
-            OFFSET += n_max_results
+            OFFSET += max_items_per_request
 
         # Get all series
         print("Getting all series info...")
@@ -139,7 +142,8 @@ def script_to_run(n_max_results=1000,
         for tag in all_tags:
             OFFSET = 0
             try:
-                temp1 = client.tags('series', tag_names=tag, limit=2, throttle=True)
+                temp1 = client.tags('series', tag_names=tag,
+                                    limit=2, throttle=True)
             except Exception:
                 entry = compose_error_entry(
                     path='series',
@@ -156,7 +160,7 @@ def script_to_run(n_max_results=1000,
                 try:
                     temp = client.tags(
                         'series', tag_names=tag, offset=OFFSET,
-                        limit=n_max_results, throttle=True
+                        limit=max_items_per_request, throttle=True
                     )
                 # Extract Series ID, Title, and popularity
                     for series in temp['seriess']:
@@ -173,13 +177,13 @@ def script_to_run(n_max_results=1000,
                         path='series',
                         tag_names=tag,
                         offset=OFFSET,
-                        limit=n_max_results,
+                        limit=max_items_per_request,
                         throttle=True
                     )
                     tags_data_error_log.append(entry)
                     break
 
-                OFFSET += n_max_results
+                OFFSET += max_items_per_request
 
         with open(fred_series_info_path, "w") as file:
             dump(series_dict, file)
@@ -205,7 +209,8 @@ def script_to_run(n_max_results=1000,
     observations_data_error_log = []
     for id in tqdm(popular_series_ids):
         try:
-            temp1 = client.series('observations', series_id=id, limit=2, throttle=True)
+            temp1 = client.series(
+                'observations', series_id=id, limit=2, throttle=True)
         except Exception:
             entry = compose_error_entry(
                 message=tb.format_exc(),
@@ -224,7 +229,8 @@ def script_to_run(n_max_results=1000,
         while OFFSET < count:
             try:
                 temp = client.series(
-                    'observations', series_id=id, offset=OFFSET, limit=n_max_results, throttle=True
+                    'observations', series_id=id, offset=OFFSET,
+                    limit=max_items_per_request, throttle=True
                 )
                 observations += temp['observations']
             except Exception:
@@ -233,17 +239,19 @@ def script_to_run(n_max_results=1000,
                     path='observations',
                     series_id=id,
                     offset=OFFSET,
-                    limit=n_max_results,
+                    limit=max_items_per_request,
                     throttle=True
                 )
                 observations_data_error_log.append(entry)
                 break
 
-            OFFSET += n_max_results
+            OFFSET += max_items_per_request
 
         bill_signed_dates, training_example_paths = get_training_example_info()
-        earliest_obs_date = datetime.strptime(observations[0]['date'], "%Y-%m-%d")
-        latest_obs_date = datetime.strptime(observations[-1]['date'], "%Y-%m-%d")
+        earliest_obs_date = datetime.strptime(
+            observations[0]['date'], "%Y-%m-%d")
+        latest_obs_date = datetime.strptime(
+            observations[-1]['date'], "%Y-%m-%d")
 
         # Write observations to file(s)
         series_was_written = False
@@ -251,17 +259,21 @@ def script_to_run(n_max_results=1000,
             training_example_paths is not None
         ):
             for bill_signed_date, training_example_path in zip(bill_signed_dates, training_example_paths):  # noqa: E501
-                bill_signed_date = datetime.strptime(bill_signed_date, "%Y-%m-%d")
+                bill_signed_date = datetime.strptime(
+                    bill_signed_date, "%Y-%m-%d")
 
                 if (
                     earliest_obs_date < bill_signed_date < latest_obs_date
                 ) and (
-                    all(series := create_feature_and_target_series(bill_signed_date, observations))
+                    all(series := create_feature_and_target_series(
+                        bill_signed_date, observations))
                 ):
                     label_filename = process_filename(f"{id}_label.csv")
                     feature_filename = process_filename(f"{id}_series.csv")
-                    feature_filepath = path.join(training_example_path, id, feature_filename)
-                    label_filepath = path.join(training_example_path, id, label_filename)
+                    feature_filepath = path.join(
+                        training_example_path, id, feature_filename)
+                    label_filepath = path.join(
+                        training_example_path, id, label_filename)
                     write_observations_to_file(series[0], feature_filepath)
                     write_observations_to_file(series[1], label_filepath)
                     series_was_written = True

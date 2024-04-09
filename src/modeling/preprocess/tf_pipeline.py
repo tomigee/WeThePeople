@@ -139,14 +139,14 @@ def set_shape(item, shape):
     return item
 
 
-def compile_training_data(training_data_folder,
-                          fred_series_id,
-                          series_seq_length,
-                          label_seq_length,
-                          n_vocab,
-                          num_threads,
-                          local_batch_size,
-                          distributed=None):
+def build(training_data_folder,
+          fred_series_id,
+          series_seq_length,
+          label_seq_length,
+          n_vocab,
+          num_threads,
+          local_batch_size,
+          distributed=None):
 
     batch_size = local_batch_size
     test_split = 20

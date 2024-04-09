@@ -13,7 +13,7 @@ from tensorflow import distribute
 from tensorflow.keras.optimizers import Adam
 from tensorflow.keras import losses
 
-from modeling.preprocess.get_training_data import compile_training_data
+from src.modeling.preprocess.tf_pipeline import build
 from modeling.models.custom_models import MyCustomModel1
 
 
@@ -269,7 +269,7 @@ def script_to_run(args, num_workers):
             "metrics_location": f"{args.output_data_dir}/metrics.json"
         }
 
-        train_data, val_data, test_data, steps_per_epoch = compile_training_data(
+        train_data, val_data, test_data, steps_per_epoch = build(
             **pipeline_hparams
         )
 

@@ -93,11 +93,13 @@ def get_law_text(
     law_text_is_bad = is_law_text_bad(law_text)
 
     if law_text_is_bad:  # Get bill file format
-        res = loads(client.bill(f"{congress_num}/{bill_type}/{bill_number}/text", throttle=True))
+        res = loads(client.bill(
+            f"{congress_num}/{bill_type}/{bill_number}/text", throttle=True))
         bill_file_format = None
         for text_version in res["textVersions"]:
             if text_version["type"] == "Enrolled Bill":
-                bill_file_format = get_bill_file_format(text_version["formats"])
+                bill_file_format = get_bill_file_format(
+                    text_version["formats"])
                 break
 
     retries = 0
@@ -154,7 +156,8 @@ def download_public_law(bill, client, billtext_error_log):
             bill_number = bill['number']
             law_number = get_public_law_number(latest_action)
             bill_title = f"{congress_number}-{law_number}"
-            data_folder_name = bill['latestAction']['actionDate'] + "_" + bill_title
+            data_folder_name = bill['latestAction']['actionDate'] + \
+                "_" + bill_title
             get_law_text(
                 congress_number,
                 law_number,
@@ -210,16 +213,16 @@ def download_public_law_after_date(earliest_date, bill, client, billtext_error_l
     return passed_earliest_date, latest_action_date
 
 
-def script_to_run(n_max_results=250,
-                  start_from_checkpoint=True,
-                  search_limit=datetime(1947, 1, 1, 00, 00, 00),
-                  max_consec_error_count=200):
+def get(max_items_per_request=250,
+        start_from_checkpoint=True,
+        search_limit=datetime(1947, 1, 1, 00, 00, 00),
+        max_consec_error_count=200):
 
     # Initialize variables
-    if n_max_results > 250:
+    if max_items_per_request > 250:
         LIMIT = 250
     else:
-        LIMIT = n_max_results
+        LIMIT = max_items_per_request
     client = Congress()
     latest_action_date = datetime.now()
     finished_searching = False
@@ -242,7 +245,8 @@ def script_to_run(n_max_results=250,
         while_loop_count += 1
 
         # Query the Congress API
-        list_of_bills, errored_out = get_list_of_bills(client, OFFSET, LIMIT, requests_error_log)
+        list_of_bills, errored_out = get_list_of_bills(
+            client, OFFSET, LIMIT, requests_error_log)
         if errored_out:
             consec_error_count += 1
             if consec_error_count > max_consec_error_count:  # HARD STOP if it keeps erroring out
@@ -301,7 +305,8 @@ def retry_errors(search_limit=datetime(1947, 1, 1, 00, 00, 00)):
     for request in tqdm(error_requests):
         OFFSET = request["offset"]
         LIMIT = request["limit"]
-        list_of_bills, errored_out = get_list_of_bills(client, OFFSET, LIMIT, requests_error_log)
+        list_of_bills, errored_out = get_list_of_bills(
+            client, OFFSET, LIMIT, requests_error_log)
 
         if errored_out:
             continue
@@ -327,7 +332,8 @@ def retry_errors(search_limit=datetime(1947, 1, 1, 00, 00, 00)):
         download_public_law(item["bill"], client, new_billtext_error_log)
 
     print("Length of billtext_error_log before retrying:", no_of_billtext_errors)
-    print("Length of billtext_error_log after retrying:", len(new_billtext_error_log))
+    print("Length of billtext_error_log after retrying:",
+          len(new_billtext_error_log))
 
     if requests_error_log:
         with open(requests_error_path, 'w') as file:
