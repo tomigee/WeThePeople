@@ -7,6 +7,8 @@ playground.*
 .vscode/
 src/datasets/
 src/error logs/
+*.zip
+*.tgz
 
 ### Python ###
 # Byte-compiled / optimized / DLL files
