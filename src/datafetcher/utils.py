@@ -3,10 +3,6 @@ from json import dump
 from html.parser import HTMLParser
 
 
-def format_source(source):
-    return source.lower()
-
-
 class MLStripper(HTMLParser):
     def __init__(self):
         super().__init__()
@@ -22,13 +18,13 @@ class MLStripper(HTMLParser):
         return self.text.getvalue()
 
 
-def strip_tags(html):
+def strip_tags(html: str) -> str:
     s = MLStripper()
     s.feed(html)
     return s.get_data()
 
 
-def process_filename(filename):
+def process_filename(filename: str) -> str:
     """
     Removes forbidden characters "/" and ":" from filename
 
@@ -36,7 +32,7 @@ def process_filename(filename):
         filename (str): Filename to search for forbidden characters
 
     Returns:
-        str: Filename with forbidden characters replaced by whitespace
+        file_name (str): Filename with forbidden characters replaced by whitespace
     """
     file_name = filename
     forbidden_chars = ["/", ":"]
@@ -45,7 +41,7 @@ def process_filename(filename):
     return file_name
 
 
-def truncate_filepath(file_path):
+def truncate_filepath(file_path: str) -> str:
     from os import path
 
     # Check the filename length
@@ -85,7 +81,7 @@ def truncate_filepath(file_path):
         return file_path
 
 
-def json_to_csv(json_structured_obj, filepath, memory_efficient=False):
+def json_to_csv(json_structured_obj, filepath: str, memory_efficient: bool = False) -> None:
     from json import dumps
     from io import StringIO
 
@@ -115,7 +111,7 @@ def json_to_csv(json_structured_obj, filepath, memory_efficient=False):
                 file.write(str_to_write + "\n")
 
 
-def write_error_files(kwargs):
+def write_error_files(kwargs: dict[str,]) -> None:
     """
     Writes error files to disk
 

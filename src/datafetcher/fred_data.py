@@ -36,7 +36,13 @@ observations_requests_error_filepath = "error logs/error_observations_requests.j
 observations_data_error_filepath = "error logs/error_observations_data.json"
 
 
-def write_observations_to_file(observations, filepath):
+def write_observations_to_file(observations: list[dict[str, str]], filepath: str) -> None:
+    """Write FRED observations to csv file.
+
+    Args:
+        observations (list[dict[str, str]]): Observations from the FRED API.
+        filepath (str): File to write observations to.
+    """
     filepath = truncate_filepath(filepath)
     if not path.exists(path.dirname(filepath)):
         os.makedirs(path.dirname(filepath))
@@ -44,7 +50,21 @@ def write_observations_to_file(observations, filepath):
     json_to_csv(observations, filepath)
 
 
-def find_date_in_observations(target_date, observations, obs_time_format="%Y-%m-%d"):
+def find_date_in_observations(
+    target_date: datetime,
+    observations: list[dict[str, str]],
+    obs_time_format: str = "%Y-%m-%d"
+) -> int:
+    """Find the index in `observations` where `target_date` is.
+
+    Args:
+        target_date (datetime): Date to search for.
+        observations (list[dict[str, str]]): Observations from the FRED API.
+        obs_time_format (str, optional): Time format of `observations`. Defaults to "%Y-%m-%d".
+
+    Returns:
+        Index in `observations` where `target_date` is. If `target_date` not present, return the index of the next greatest date.
+    """  # noqa: E501
     start_ind, end_ind = 0, len(observations)
     while start_ind < end_ind-1:
         i = int((start_ind + end_ind)/2)
@@ -66,11 +86,22 @@ def find_date_in_observations(target_date, observations, obs_time_format="%Y-%m-
 
 
 def create_feature_and_target_series(
-    separation_date,
-    observations,
-    feature_series_timespan=timedelta(days=365*10),
-    target_series_timespan=timedelta(days=365*5)
-):
+    separation_date: datetime,
+    observations: list[dict[str, str]],
+    feature_series_timespan: timedelta = timedelta(days=365*10),
+    target_series_timespan: timedelta = timedelta(days=365*5)
+) -> tuple[list[dict[str, str]], list[dict[str, str]]] | tuple[None, None]:
+    """Split FRED observations into two datasets (`feature_series` and `target_series`) at `separation_date`. `feature_series` is then obtained from observations before `separation_date`, and `target_series` from observations after `separation_date`.
+
+    Args:
+        separation_date (datetime): Date at which `observations` are split into feature and target series.
+        observations (list[dict[str, str]]): Observations from the FRED API.
+        feature_series_timespan (timedelta, optional): Observations within this duration before `separation_date` become `feature_series`. Defaults to 10 years.
+        target_series_timespan (timedelta, optional): Observations within this duration after `separation_date` become `target_series`. Defaults to 5 years.
+
+    Returns:
+        Tuple of `feature_series` and `target_series`.
+    """  # noqa: E501
     obs_time_format = "%Y-%m-%d"
 
     # Calculate time interval between observations
@@ -94,7 +125,12 @@ def create_feature_and_target_series(
     return None, None
 
 
-def get_training_example_info():
+def get_training_example_info() -> tuple[list[str], list[str]] | tuple[None, None]:
+    """Get dates that all downloaded bills were signed into law and the filesystem location of the bills.
+
+    Returns:
+        List of dates that bills were signed into law, and corresponding list of filesystem locations.
+    """  # noqa: E501
     if not os.path.isdir(training_data_path):
         return None, None
 
@@ -113,9 +149,18 @@ def get_training_example_info():
     return bill_approval_dates, training_example_paths
 
 
-def get(max_items_per_request=1000,
-        min_popularity=85,
-        get_series_info_from_Fred=False):
+def get(
+    max_items_per_request: int = 1000,
+    min_popularity: int = 85,
+    get_series_info_from_Fred: bool = False
+) -> None:
+    """Find and download FRED observations above a certain `min_popularity` rating.
+
+    Args:
+        max_items_per_request (int, optional): Fred API parameter; maximum number of records returned per request. Defaults to 1000.
+        min_popularity (int, optional): Get observations for FRED series with popularity higher than this. Defaults to 85.
+        get_series_info_from_Fred (bool, optional): Obtain FRED series metadata from FRED. If false, gets FRED series metadata from local file. Defaults to False.
+    """  # noqa: E501
     OFFSET = 0
     client = Fred()
     if max_items_per_request > 1000:
