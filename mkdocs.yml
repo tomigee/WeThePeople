@@ -1,0 +1,20 @@
+site_name: WeThePeople
+theme:
+  name: material
+
+plugins:
+  - mkdocstrings:
+      handlers:
+        python:
+          options:
+            show_root_toc_entry: False
+
+nav:
+  - Home: 'index.md'
+  - Sourcing Datasets:
+    - Overview: 'get_all_data.md'
+    - Congress.gov Data: 'congress_data.md'
+    - FRED Data: 'fred_data.md'
+  - Machine Learning:
+    - Data Pipeline: 'preprocess.md'
+    - Building a Model: 'models.md'

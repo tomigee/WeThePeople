@@ -23,7 +23,7 @@ from .utils import (
     truncate_filepath,
     process_filename,
     compose_error_entry,
-    write_error_files
+    write_error_files,
 )
 
 # Script parameters
@@ -36,7 +36,9 @@ observations_requests_error_filepath = "error logs/error_observations_requests.j
 observations_data_error_filepath = "error logs/error_observations_data.json"
 
 
-def write_observations_to_file(observations: list[dict[str, str]], filepath: str) -> None:
+def write_observations_to_file(
+    observations: list[dict[str, str]], filepath: str
+) -> None:
     """Write FRED observations to csv file.
 
     Args:
@@ -53,7 +55,7 @@ def write_observations_to_file(observations: list[dict[str, str]], filepath: str
 def find_date_in_observations(
     target_date: datetime,
     observations: list[dict[str, str]],
-    obs_time_format: str = "%Y-%m-%d"
+    obs_time_format: str = "%Y-%m-%d",
 ) -> int:
     """Find the index in `observations` where `target_date` is.
 
@@ -66,10 +68,9 @@ def find_date_in_observations(
         Index in `observations` where `target_date` is. If `target_date` not present, return the index of the next greatest date.
     """  # noqa: E501
     start_ind, end_ind = 0, len(observations)
-    while start_ind < end_ind-1:
-        i = int((start_ind + end_ind)/2)
-        observation_date = datetime.strptime(
-            observations[i]["date"], obs_time_format)
+    while start_ind < end_ind - 1:
+        i = int((start_ind + end_ind) / 2)
+        observation_date = datetime.strptime(observations[i]["date"], obs_time_format)
         if target_date == observation_date:
             return i
         elif target_date < observation_date:
@@ -79,17 +80,17 @@ def find_date_in_observations(
             start_ind = i
             greater_flag = True
 
-        if not (start_ind < end_ind-1):
+        if not (start_ind < end_ind - 1):
             if greater_flag:
-                i = i+1
+                i = i + 1
     return i
 
 
 def create_feature_and_target_series(
     separation_date: datetime,
     observations: list[dict[str, str]],
-    feature_series_timespan: timedelta = timedelta(days=365*10),
-    target_series_timespan: timedelta = timedelta(days=365*5)
+    feature_series_timespan: timedelta = timedelta(days=365 * 10),
+    target_series_timespan: timedelta = timedelta(days=365 * 5),
 ) -> tuple[list[dict[str, str]], list[dict[str, str]]] | tuple[None, None]:
     """Split FRED observations into two datasets (`feature_series` and `target_series`) at `separation_date`. `feature_series` is then obtained from observations before `separation_date`, and `target_series` from observations after `separation_date`.
 
@@ -107,20 +108,17 @@ def create_feature_and_target_series(
     # Calculate time interval between observations
     obs_interval = datetime.strptime(
         observations[1]["date"], obs_time_format
-    ) - datetime.strptime(
-        observations[0]["date"], obs_time_format
-    )
-    backward_steps = feature_series_timespan//obs_interval
-    forward_steps = target_series_timespan//obs_interval
+    ) - datetime.strptime(observations[0]["date"], obs_time_format)
+    backward_steps = feature_series_timespan // obs_interval
+    forward_steps = target_series_timespan // obs_interval
 
     # Find index of separation_date with BST
-    i = find_date_in_observations(
-        separation_date, observations, obs_time_format)
+    i = find_date_in_observations(separation_date, observations, obs_time_format)
 
     # Create feature and target series
-    if backward_steps <= i <= len(observations)-forward_steps:
-        feature_series = observations[i-backward_steps:i]
-        target_series = observations[i:i+forward_steps]
+    if backward_steps <= i <= len(observations) - forward_steps:
+        feature_series = observations[i - backward_steps : i]
+        target_series = observations[i : i + forward_steps]
         return feature_series, target_series
     return None, None
 
@@ -152,7 +150,7 @@ def get_training_example_info() -> tuple[list[str], list[str]] | tuple[None, Non
 def get(
     max_items_per_request: int = 1000,
     min_popularity: int = 85,
-    get_series_info_from_Fred: bool = False
+    get_series_info_from_Fred: bool = False,
 ) -> None:
     """Find and download FRED observations above a certain `min_popularity` rating.
 
@@ -173,10 +171,11 @@ def get(
         temp = client.tags(limit=2)
         count = temp["count"]
         while OFFSET < count:
-            temp = client.tags(limit=max_items_per_request,
-                               offset=OFFSET, throttle=True)
-            for tag in temp['tags']:
-                all_tags.append(tag['name'])
+            temp = client.tags(
+                limit=max_items_per_request, offset=OFFSET, throttle=True
+            )
+            for tag in temp["tags"]:
+                all_tags.append(tag["name"])
             OFFSET += max_items_per_request
 
         # Get all series
@@ -187,43 +186,42 @@ def get(
         for tag in all_tags:
             OFFSET = 0
             try:
-                temp1 = client.tags('series', tag_names=tag,
-                                    limit=2, throttle=True)
+                temp1 = client.tags("series", tag_names=tag, limit=2, throttle=True)
             except Exception:
                 entry = compose_error_entry(
-                    path='series',
-                    tag_names=tag,
-                    limit=2,
-                    throttle=True
+                    path="series", tag_names=tag, limit=2, throttle=True
                 )
                 tags_request_error_log.append(entry)
                 continue
 
-            count = temp1['count']
+            count = temp1["count"]
 
             while OFFSET < count:
                 try:
                     temp = client.tags(
-                        'series', tag_names=tag, offset=OFFSET,
-                        limit=max_items_per_request, throttle=True
+                        "series",
+                        tag_names=tag,
+                        offset=OFFSET,
+                        limit=max_items_per_request,
+                        throttle=True,
                     )
-                # Extract Series ID, Title, and popularity
-                    for series in temp['seriess']:
-                        if series['id'] not in series_dict:
+                    # Extract Series ID, Title, and popularity
+                    for series in temp["seriess"]:
+                        if series["id"] not in series_dict:
                             entry = {
-                                series['id']: {
-                                    'title': series['title'],
-                                    'popularity': series['popularity']
+                                series["id"]: {
+                                    "title": series["title"],
+                                    "popularity": series["popularity"],
                                 }
                             }
                             series_dict.update(entry)
                 except Exception:
                     entry = compose_error_entry(
-                        path='series',
+                        path="series",
                         tag_names=tag,
                         offset=OFFSET,
                         limit=max_items_per_request,
-                        throttle=True
+                        throttle=True,
                     )
                     tags_data_error_log.append(entry)
                     break
@@ -233,10 +231,10 @@ def get(
         with open(fred_series_info_path, "w") as file:
             dump(series_dict, file)
         if tags_request_error_log:
-            with open(tags_requests_error_filepath, 'w') as file:
+            with open(tags_requests_error_filepath, "w") as file:
                 dump(tags_request_error_log, file)
         if tags_data_error_log:
-            with open(tags_data_error_filepath, 'w') as file:
+            with open(tags_data_error_filepath, "w") as file:
                 dump(tags_data_error_log, file)
     else:
         with open("fred_series_info.json", "r") as file:
@@ -246,7 +244,7 @@ def get(
     # Get top series by popularity
     popular_series_ids = []
     for id, details in series_dict.items():
-        if details['popularity'] >= min_popularity:
+        if details["popularity"] >= min_popularity:
             popular_series_ids.append(id)
 
     print("Getting relevant observation data...")
@@ -254,38 +252,40 @@ def get(
     observations_data_error_log = []
     for id in tqdm(popular_series_ids):
         try:
-            temp1 = client.series(
-                'observations', series_id=id, limit=2, throttle=True)
+            temp1 = client.series("observations", series_id=id, limit=2, throttle=True)
         except Exception:
             entry = compose_error_entry(
                 message=tb.format_exc(),
-                path='observations',
+                path="observations",
                 series_id=id,
                 limit=2,
-                throttle=True
+                throttle=True,
             )
             observations_request_error_log.append(entry)
             continue
 
-        count = temp1['count']
+        count = temp1["count"]
         observations = []
         OFFSET = 0
 
         while OFFSET < count:
             try:
                 temp = client.series(
-                    'observations', series_id=id, offset=OFFSET,
-                    limit=max_items_per_request, throttle=True
-                )
-                observations += temp['observations']
-            except Exception:
-                entry = compose_error_entry(
-                    message=tb.format_exc(),
-                    path='observations',
+                    "observations",
                     series_id=id,
                     offset=OFFSET,
                     limit=max_items_per_request,
-                    throttle=True
+                    throttle=True,
+                )
+                observations += temp["observations"]
+            except Exception:
+                entry = compose_error_entry(
+                    message=tb.format_exc(),
+                    path="observations",
+                    series_id=id,
+                    offset=OFFSET,
+                    limit=max_items_per_request,
+                    throttle=True,
                 )
                 observations_data_error_log.append(entry)
                 break
@@ -293,46 +293,44 @@ def get(
             OFFSET += max_items_per_request
 
         bill_signed_dates, training_example_paths = get_training_example_info()
-        earliest_obs_date = datetime.strptime(
-            observations[0]['date'], "%Y-%m-%d")
-        latest_obs_date = datetime.strptime(
-            observations[-1]['date'], "%Y-%m-%d")
+        earliest_obs_date = datetime.strptime(observations[0]["date"], "%Y-%m-%d")
+        latest_obs_date = datetime.strptime(observations[-1]["date"], "%Y-%m-%d")
 
         # Write observations to file(s)
         series_was_written = False
-        if (
-            training_example_paths is not None
-        ):
-            for bill_signed_date, training_example_path in zip(bill_signed_dates, training_example_paths):  # noqa: E501
-                bill_signed_date = datetime.strptime(
-                    bill_signed_date, "%Y-%m-%d")
+        if training_example_paths is not None:
+            for bill_signed_date, training_example_path in zip(
+                bill_signed_dates, training_example_paths
+            ):  # noqa: E501
+                bill_signed_date = datetime.strptime(bill_signed_date, "%Y-%m-%d")
 
-                if (
-                    earliest_obs_date < bill_signed_date < latest_obs_date
-                ) and (
-                    all(series := create_feature_and_target_series(
-                        bill_signed_date, observations))
+                if (earliest_obs_date < bill_signed_date < latest_obs_date) and (
+                    all(
+                        series := create_feature_and_target_series(
+                            bill_signed_date, observations
+                        )
+                    )
                 ):
                     label_filename = process_filename(f"{id}_label.csv")
                     feature_filename = process_filename(f"{id}_series.csv")
                     feature_filepath = path.join(
-                        training_example_path, id, feature_filename)
+                        training_example_path, id, feature_filename
+                    )
                     label_filepath = path.join(
-                        training_example_path, id, label_filename)
+                        training_example_path, id, label_filename
+                    )
                     write_observations_to_file(series[0], feature_filepath)
                     write_observations_to_file(series[1], label_filepath)
                     series_was_written = True
 
         if not series_was_written:
-            filename = process_filename(
-                series_dict[id]['title'] + f" ({id}).csv"
-            )
+            filename = process_filename(series_dict[id]["title"] + f" ({id}).csv")
             filepath = path.join(fred_data_path, filename)
             write_observations_to_file(observations, filepath)
 
     write_error_files(
         {
             observations_requests_error_filepath: observations_request_error_log,
-            observations_data_error_filepath: observations_data_error_log
+            observations_data_error_filepath: observations_data_error_log,
         }
     )
