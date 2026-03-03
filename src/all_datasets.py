@@ -1,4 +1,4 @@
-from .datafetcher import fred_data
+from .datafetcher import fred_datafetcher
 from .datafetcher import congress_data
 
 
@@ -24,6 +24,6 @@ def get(
     if compile_congress_dataset:  # Download and compile Congress dataset
         congress_data.get(**congress_args)
     if compile_fred_dataset:  # Download and compile FRED dataset
-        fred_data.get(**fred_args)
+        fred_datafetcher.get(**fred_args)
     if retry_congress_errors:  # Retry failed congress downloads
         congress_data.retry_errors(**retry_args)

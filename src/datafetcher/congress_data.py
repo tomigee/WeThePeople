@@ -19,86 +19,90 @@ from .utils import (
     strip_tags,
     process_filename,
     truncate_filepath,
+    load_json_file,
 )
 
-# Script parameters
-training_data_path = "datasets/training data"
-requests_error_path = "error logs/error_requests.json"
-billtext_error_path = "error logs/error_bill_text.json"
-checkpoint_file_path = "error logs/bill_requests_checkpoint.json"
 
-
-def get_law_text(
-    congress_num: str,
-    law_num: str,
-    law_title: str,
-    bill_type: str,
-    bill_number: str,
-    client: Congress,
-    write_to_folder: str = None,
-) -> str | None:
-    """Downloads or returns the raw text of a public law. Currently supports Formatted Text
-    Congress.gov format only. Support for PDF might be added later.
+class CongressData:
+    """A class for fetching and processing data from the Congress.gov API.
 
     Args:
-        congress_num (str): The congress number. For example, for the 117th congress, this
-        argument is 117.
-        law_num (str): The public law number. Appended to the name of the downloaded file.
-        law_title (str): The title of the law. Appended to the name of the downloaded file.
-        bill_type (str): The bill type. See https://api.congress.gov/#/bill/bill_list_by_type
-        for details.
-        bill_number (str): The bill number. See https://api.congress.gov/#/bill/bill_details
-        for details.
-        client (Congress): The Congress client object used to send requests to the Congress.gov API.
-        write_to_folder (str, optional): Folder to which raw text files will be written. If not
-        provided, raw text will be returned. Defaults to None.
+        search_limit (datetime, optional): The limit for the search protocol, specifying the earliest date for bills to be downloaded. Defaults to datetime(1947, 1, 1, 00, 00, 00).
+        max_consec_error_count (int, optional): The maximum number of consecutive errors allowed before stopping the search protocol. Defaults to 200.
+        limit (int, optional): The limit for the number of bills to be fetched per API request. Defaults to 250.
+        start_from_checkpoint (bool, optional): Indicates whether to start the search protocol from the last checkpoint. Defaults to True.
+        training_data_path (str, optional): The path to the folder where training data will be stored. Defaults to "datasets/training data".
+        requests_error_path (str, optional): The path to the file where requests error logs will be stored. Defaults to "error logs/error_requests.json".
+        billtext_error_path (str, optional): The path to the file where bill text error logs will be stored. Defaults to "error logs/error_bill_text.json".
+        checkpoint_file_path (str, optional): The path to the file where the checkpoint data will be stored. Defaults to "error logs/bill_requests_checkpoint.json".
+    """  # noqa: E501
 
-    Returns:
-        The law text if `write_to_folder` is not provided. `None` otherwise.
-    """
+    def __init__(
+        self,
+        search_limit: datetime = datetime(1947, 1, 1, 00, 00, 00),
+        max_consec_error_count: int = 200,
+        limit: int = 250,
+        start_from_checkpoint: bool = True,
+        training_data_path: str = "datasets/training data",
+        requests_error_path: str = "error logs/error_requests.json",
+        billtext_error_path: str = "error logs/error_bill_text.json",
+        checkpoint_file_path: str = "error logs/bill_requests_checkpoint.json",
+    ):
+        self.search_limit = search_limit
+        self.max_consec_error_count = max_consec_error_count
+        if limit > 250:
+            self.limit = 250
+        else:
+            self.limit = limit
 
-    def compose_law_url(congress_num: str, law_num: str) -> str:
-        """Composes URL where law text is located.
+        self.start_from_checkpoint = start_from_checkpoint
+        self.client = Congress()
+        self._bill = None
+        self._data_folder_name = None
+        self.training_data_path = training_data_path
+        self.requests_error_path = requests_error_path
+        self.billtext_error_path = billtext_error_path
+        self.checkpoint_file_path = checkpoint_file_path
 
-        Args:
-            congress_num (str): The congress number. For example, for the 117th congress, this
-            argument is 117.
-            law_num (str): The public law number. Appended to the name of the downloaded file.
+    @property
+    def data_folder_name(self):
+        return self._data_folder_name
 
-        Returns:
-            URL where law text is located.
-        """
-        url = f"https://www.congress.gov/{congress_num}/plaws/publ{law_num}/PLAW-{congress_num}publ{law_num}.htm"  # noqa E501
-        return url
+    @property
+    def bill(self):
+        return self._bill
 
-    def compose_bill_url(congress_num: str, bill_type: str, bill_number: str) -> str:
-        """Composes URL where bill text is located.
+    @bill.setter
+    def bill(self, new_bill):
+        terminal_folder = (
+            new_bill.raw["latestAction"]["actionDate"] + "_" + new_bill.bill_title
+        )
+        self._data_folder_name = f"{self.training_data_path}/{terminal_folder}"
+        self._bill = new_bill
 
-        Args:
-            congress_num (str): _description_
-            bill_type (str): _description_
-            bill_number (str): _description_
-
-        Returns:
-            str: _description_
-        """
-        url = f"https://www.congress.gov/{congress_num}/bills/{bill_type.lower()}{bill_number}/BILLS-{congress_num}{bill_type.lower()}{bill_number}enr.htm"  # noqa E501
-        return url
-
-    def get_clean_text(url: str) -> str:
-        """Removes HTML tags from raw text.
+    def _get_clean_law_text(self, url: str, max_retries: int = 3) -> str:
+        """Gets clean law/bill text from provided URL. Strips HTML tags.
 
         Args:
             url (str): URL where raw text is located.
+            max_retries (int, optional): Maximum number of retries if the law text is bad. Defaults to 3.
 
         Returns:
-            Text with HTML tags removed
-        """
-        response = requests.get(url)
-        clean_text = strip_tags(response.text)
+            str: Cleaned law/bill text.
+        """  # noqa: E501
+        clean_text = None
+        retries = 0
+        law_text_is_bad = self._is_law_text_bad(clean_text)
+        while law_text_is_bad and retries < max_retries:
+            response = requests.get(url)
+            clean_text = strip_tags(response.text)
+            law_text_is_bad = self._is_law_text_bad(clean_text)
+            retries += 1
+        if law_text_is_bad:
+            return None
         return clean_text
 
-    def is_law_text_bad(law_text: str) -> bool:
+    def _is_law_text_bad(self, law_text: str) -> bool:
         """Detects if the downloaded law text is garbage error text.
 
         Args:
@@ -121,326 +125,323 @@ def get_law_text(
         )
         return law_text_is_bad
 
-    def get_bill_file_format(formats: list[dict[str, str]]) -> str | None:
-        """Get the format of the bill.
+    def _write_to_disk(self, law_text: str) -> None:
+        """Writes the law text to disk.
 
         Args:
-            formats (list[dict[str, str]]): TODO: Populate this.
-
-        Returns:
-            The format of the bill.
+            write_to_folder (str): Folder to which raw text files will be written.
         """
-        for file_format in formats:
-            if file_format["type"] == "Formatted Text":
-                return "Formatted Text"
-            elif file_format["type"] == "PDF":
-                ans = "PDF"
-            else:
-                ans = None
-        return ans
-
-    law_title = process_filename(law_title)
-
-    if law_num is not None:
-        law_text = get_clean_text(compose_law_url(congress_num, law_num))
-    else:
-        law_text = get_clean_text(
-            compose_bill_url(congress_num, bill_type, bill_number)
-        )
-
-    # Check if law_text is legit.
-    law_text_is_bad = is_law_text_bad(law_text)
-
-    if law_text_is_bad:  # Get bill file format
-        res = loads(
-            client.bill(f"{congress_num}/{bill_type}/{bill_number}/text", throttle=True)
-        )
-        bill_file_format = None
-        for text_version in res["textVersions"]:
-            if text_version["type"] == "Enrolled Bill":
-                bill_file_format = get_bill_file_format(text_version["formats"])
-                break
-
-    retries = 0
-    while law_text_is_bad and retries < 3:  # law_text isn't legit; try bill text
-        if bill_file_format == "Formatted Text":  # if formatted text exists
-            law_text = get_clean_text(
-                compose_bill_url(congress_num, bill_type, bill_number)
-            )
-
-        # elif bill_file_format == "PDF":
-        # do something, yet to be implemented
-
-        else:
-            break
-
-        law_text_is_bad = is_law_text_bad(law_text)
-        retries += 1
-
-    if law_text_is_bad:
-        # error out
-        raise ValueError("Bad API Response")
-
-    # Write to file or return
-    if write_to_folder is None:
-        return law_text
-    else:
-        file_path = "/".join([str(write_to_folder), law_title + ".txt"])
+        law_title = process_filename(self.bill_title)
+        file_path = "/".join([str(self.data_folder_name), law_title + ".txt"])
         if len(file_path) > 255:
             file_path = truncate_filepath(file_path)
-        folder_path = path.join(os.getcwd(), write_to_folder)
+        folder_path = path.join(os.getcwd(), self.data_folder_name)
         if not path.exists(folder_path):
             os.makedirs(folder_path)
 
         with open(file_path, "w") as file:
             file.write(law_text)
 
+    def _get_law_text(self) -> str:
+        """Downloads or returns the raw text of a public law. Currently supports Formatted Text
+        Congress.gov format only. Support for PDF might be added later.
 
-def get_public_law_number(phrase: str) -> str | None:
-    """Get the law number of a public law.
+        Args:
+            congress_num (str): The congress number. For example, for the 117th congress, this
+            argument is 117.
+            law_num (str): The public law number. Appended to the name of the downloaded file.
+            law_title (str): The title of the law. Appended to the name of the downloaded file.
+            bill_type (str): The bill type. See https://api.congress.gov/#/bill/bill_list_by_type
+            for details.
+            bill_number (str): The bill number. See https://api.congress.gov/#/bill/bill_details
+            for details.
+            client (Congress): The Congress client object used to send requests to the Congress.gov API.
+            write_to_folder (str, optional): Folder to which raw text files will be written. If not
+            provided, raw text will be returned. Defaults to None.
 
-    Args:
-        phrase (str): Phrase to check for "Became public Law" regex pattern.
+        Returns:
+            The law text if `write_to_folder` is not provided. `None` otherwise.
+        """  # noqa: E501
 
-    Returns:
-        The public law number.
-    """
-    pattern = r"Became Public Law No: [\d]+-([\d]+)."
-    re_match = re.match(pattern, phrase)
-    if re_match is not None:
-        pl_num = re_match.group(1)
-        return pl_num
-    else:
-        return None
+        if self.bill.law_number is not None:
+            law_text = self._get_clean_law_text(self.bill.law_url)
+        else:
+            law_text = self._get_clean_law_text(self.bill.bill_url)
 
+        if law_text is None:
+            raise ValueError("Bad API Response")
+        return law_text
 
-def download_public_law(
-    bill: dict[str,], client: Congress, billtext_error_log: list[dict[str,]]
-) -> None:
-    """Downloads the public law version of a given bill (if possible).
+    def download_public_law(self) -> None:
+        """Downloads the public law version of a given bill (if possible).
 
-    Args:
-        bill (dict[str, ]): Information about the given bill, as provided by Congress.gov API
-        client (Congress): The Congress client object used to send requests to the Congress.gov API.
-        billtext_error_log (list[dict[str,]]): Log of detailed errors encountered when downloading the bill text.
-    """  # noqa: E501
-    latest_action = bill["latestAction"]["text"]
-    if "became public law" in latest_action.lower():
+        Args:
+            bill (dict[str, ]): Information about the given bill, as provided by Congress.gov API
+            client (Congress): The Congress client object used to send requests to the Congress.gov API.
+            billtext_error_log (list[dict[str,]]): Log of detailed errors encountered when downloading the bill text.
+        """  # noqa: E501
+
+        if "became public law" in self.bill.latest_action.lower():
+            try:
+                law_text = self._get_law_text()
+                self._write_to_disk(law_text)
+            except Exception:
+                # Log error to a json file
+                error_entry = compose_error_entry(
+                    message=tb.format_exc(), bill=self.bill.raw
+                )
+                self.billtext_error_log.append(error_entry)
+
+    def get_list_of_bills(self) -> tuple[dict[str, list[dict[str,]]], bool]:
+        """Get metadata on bills by querying Congress.gov API bills endpoint with the given `OFFSET`
+        and `LIMIT` parameters.
+
+        Args:
+            client (Congress): The Congress client object used to send requests to the Congress.gov API.
+            OFFSET (int): Congress.gov API parameter. See https://api.congress.gov/#/bill/bill_list_all for details.
+            LIMIT (int): Congress.gov API parameter. See https://api.congress.gov/#/bill/bill_list_all for details.
+            requests_error_log (list[dict[str, str]]): Log of errors encountered when querying the Congress.gov API bills endpoint.
+
+        Returns:
+            A tuple containing the de-serialized JSON response from the API and an indicator of whether the transaction was successful.
+        """  # noqa: E501
+        errored_out = False
         try:
-            congress_number = bill["congress"]
-            bill_type = bill["type"]
-            bill_number = bill["number"]
-            law_number = get_public_law_number(latest_action)
-            bill_title = f"{congress_number}-{law_number}"
-            data_folder_name = bill["latestAction"]["actionDate"] + "_" + bill_title
-            get_law_text(
-                congress_number,
-                law_number,
-                bill_title,
-                bill_type,
-                bill_number,
-                client,
-                f"{training_data_path}/{data_folder_name}",
+            response = loads(
+                self.client.bill(offset=self.OFFSET, limit=self.limit, throttle=True)
             )
         except Exception:
-            # Log error to a json file
-            error_entry = compose_error_entry(message=tb.format_exc(), bill=bill)
-            billtext_error_log.append(error_entry)
+            error_entry = compose_error_entry(
+                message=tb.format_exc(), offset=self.OFFSET, limit=self.limit
+            )
+            self.requests_error_log.append(error_entry)
+            errored_out = True
+            response = None
 
+        return response, errored_out
 
-def get_list_of_bills(
-    client: Congress, OFFSET: int, LIMIT: int, requests_error_log: list[dict[str, str]]
-) -> tuple[dict[str, list[dict[str,]]], bool]:
-    """Get metadata on bills by querying Congress.gov API bills endpoint with the given `OFFSET`
-    and `LIMIT` parameters.
+    def download_public_law_if_after_date(self) -> tuple[bool, datetime]:
+        """Downloads all available public laws signed into law after `earliest_date`.
 
-    Args:
-        client (Congress): The Congress client object used to send requests to the Congress.gov API.
-        OFFSET (int): Congress.gov API parameter. See https://api.congress.gov/#/bill/bill_list_all for details.
-        LIMIT (int): Congress.gov API parameter. See https://api.congress.gov/#/bill/bill_list_all for details.
-        requests_error_log (list[dict[str, str]]): Log of errors encountered when querying the Congress.gov API bills endpoint.
+        Args:
+            earliest_date (datetime): The date after which bills signed into law are to be downloaded.
+            bill (dict[str, ]): Information about the given bill, as provided by Congress.gov API
+            client (Congress): The Congress client object used to send requests to the Congress.gov API.
+            billtext_error_log (list[dict[str,]]): Log of detailed errors encountered when downloading the bill text.
 
-    Returns:
-        A tuple containing the de-serialized JSON response from the API and an indicator of whether the transaction was successful.
-    """  # noqa: E501
-    errored_out = False
-    try:
-        response = loads(client.bill(offset=OFFSET, limit=LIMIT, throttle=True))
-    except Exception:
-        error_entry = compose_error_entry(
-            message=tb.format_exc(), offset=OFFSET, limit=LIMIT
+        Returns:
+            Indicator of whether the search protocol has arrived at `earliest_date`, the latest date the search protocol has examined.
+        """  # noqa: E501
+        passed_earliest_date = False
+        latest_action_date = datetime.strptime(self.bill.latest_action_date, "%Y-%m-%d")
+        if latest_action_date > self.search_limit:
+            self.download_public_law()
+        else:
+            passed_earliest_date = True
+
+        return passed_earliest_date, latest_action_date
+
+    def _initialize_variables(self):
+        self.latest_action_date = datetime.now()
+        self.finished_searching = False
+        self.while_loop_count = 0
+        self.consec_error_count = 0
+        self.OFFSET = (
+            0
+            if not self.start_from_checkpoint
+            else self._load_checkpoint()["offset"]
+            - self.max_consec_error_count * self.limit
         )
-        requests_error_log.append(error_entry)
-        errored_out = True
-        response = None
-
-    return response, errored_out
-
-
-def download_public_law_after_date(
-    earliest_date: datetime,
-    bill: dict[str,],
-    client: Congress,
-    billtext_error_log: list[dict[str,]],
-) -> tuple[bool, datetime]:
-    """Downloads all available public laws signed into law after `earliest_date`.
-
-    Args:
-        earliest_date (datetime): The date after which bills signed into law are to be downloaded.
-        bill (dict[str, ]): Information about the given bill, as provided by Congress.gov API
-        client (Congress): The Congress client object used to send requests to the Congress.gov API.
-        billtext_error_log (list[dict[str,]]): Log of detailed errors encountered when downloading the bill text.
-
-    Returns:
-        Indicator of whether the search protocol has arrived at `earliest_date`, the latest date the search protocol has examined.
-    """  # noqa: E501
-    passed_earliest_date = False
-    latest_action_date = datetime.strptime(
-        bill["latestAction"]["actionDate"], "%Y-%m-%d"
-    )
-    if latest_action_date > earliest_date:
-        download_public_law(bill, client, billtext_error_log)
-    else:
-        passed_earliest_date = True
-
-    return passed_earliest_date, latest_action_date
-
-
-def get(
-    max_items_per_request: int = 250,
-    start_from_checkpoint: bool = True,
-    search_limit: datetime = datetime(1947, 1, 1, 00, 00, 00),
-    max_consec_error_count: int = 200,
-) -> None:
-    """Get law text for all bills that became public law after `search_limit`.
-
-    Args:
-        max_items_per_request (int, optional): Congress.gov API parameter; maximum number of records that each request can return. Defaults to 250.
-        start_from_checkpoint (bool, optional): Indicate if starting from a checkpoint. If False, starts searching from today's date. Defaults to True.
-        search_limit (datetime, optional): Date after which bills signed into law should be downloaded. Defaults to datetime(1947, 1, 1, 00, 00, 00).
-        max_consec_error_count (int, optional): Maximum number of times this function can error out due to API issues. Defaults to 200.
-    """  # noqa: E501
-    # Initialize variables
-    if max_items_per_request > 250:
-        LIMIT = 250
-    else:
-        LIMIT = max_items_per_request
-    client = Congress()
-    latest_action_date = datetime.now()
-    finished_searching = False
-    while_loop_count = 0
-    consec_error_count = 0
-    if start_from_checkpoint:
-        with open(requests_error_path, "r") as file:
-            requests_error_log = load(file)
-        with open(billtext_error_path, "r") as file:
-            billtext_error_log = load(file)
-        with open(checkpoint_file_path, "r") as file:
-            temp = load(file)
-        OFFSET = temp["offset"] - max_consec_error_count * LIMIT
-    else:
-        OFFSET = 0
-        requests_error_log = []
-        billtext_error_log = []
-
-    while not finished_searching:
-        while_loop_count += 1
-
-        # Query the Congress API
-        list_of_bills, errored_out = get_list_of_bills(
-            client, OFFSET, LIMIT, requests_error_log
+        self.requests_error_log = (
+            []
+            if not self.start_from_checkpoint
+            else self._load_error_log(self.requests_error_path)
         )
-        if errored_out:
-            consec_error_count += 1
-            if (
-                consec_error_count > max_consec_error_count
-            ):  # HARD STOP if it keeps erroring out
-                # TODO: Write offset to file the first time it errors out with code 429
-                temp = {
-                    "offset": OFFSET,
-                    "stoptime": datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S"),
-                }
-                with open(checkpoint_file_path, "w") as file:
-                    dump(temp, file)  # save checkpoint file
-                break
+        self.billtext_error_log = (
+            []
+            if not self.start_from_checkpoint
+            else self._load_error_log(self.billtext_error_path)
+        )
 
-            OFFSET += LIMIT
-            if while_loop_count % 5 == 0:
-                print("Current latest action date: ", latest_action_date)
-            continue
-        consec_error_count = 0
+    def _load_error_log(self, path):
+        with open(path, "r") as file:
+            return load(file)
 
+    def _load_checkpoint(self):
+        return load_json_file(self.checkpoint_file_path)
+
+    def _handle_error(self):
+        self.consec_error_count += 1
+        if self.consec_error_count > self.max_consec_error_count:
+            temp = {
+                "offset": self.OFFSET,
+                "stoptime": datetime.strftime(datetime.now(), "%Y-%m-%d %H:%M:%S"),
+            }
+            with open(self.checkpoint_file_path, "w") as file:
+                dump(temp, file)  # save checkpoint file
+            return True
+        self.OFFSET += self.limit
+        return False
+
+    def _process_bills(self, list_of_bills):
         if not list_of_bills["bills"]:
-            finished_searching = True
-
+            self.finished_searching = True
         for bill in list_of_bills["bills"]:
-            finished_searching, latest_action_date = download_public_law_after_date(
-                search_limit, bill, client, billtext_error_log
+            self.bill = CongressBill(bill)
+            self.finished_searching, self.latest_action_date = (
+                self.download_public_law_if_after_date(self.billtext_error_log)
             )
+            if self.finished_searching:
+                break
+        self.OFFSET += self.limit
 
-        OFFSET += LIMIT
-        if while_loop_count % 5 == 0:
-            print("Current latest action date: ", latest_action_date)
+    def get(self) -> None:
+        """Get law text for all bills that became public law after `search_limit`.
 
-    write_error_files(
-        {
-            requests_error_path: requests_error_log,
-            billtext_error_path: billtext_error_log,
-        }
-    )
+        Args:
+            max_items_per_request (int, optional): Congress.gov API parameter; maximum number of records that each request can return. Defaults to 250.
+            start_from_checkpoint (bool, optional): Indicate if starting from a checkpoint. If False, starts searching from today's date. Defaults to True.
+            search_limit (datetime, optional): Date after which bills signed into law should be downloaded. Defaults to datetime(1947, 1, 1, 00, 00, 00).
+            max_consec_error_count (int, optional): Maximum number of times this function can error out due to API issues. Defaults to 200.
+        """  # noqa: E501
+        self._initialize_variables()
 
+        while not self.finished_searching:
+            self.while_loop_count += 1
+            list_of_bills, errored_out = self.get_list_of_bills()
+            if errored_out:
+                if self._handle_error():
+                    break
+                continue
+            self.consec_error_count = 0
+            self._process_bills(list_of_bills)
+            if self.while_loop_count % 5 == 0:
+                print("Current latest action date: ", self.latest_action_date)
 
-def retry_errors(search_limit: datetime = datetime(1947, 1, 1, 00, 00, 00)) -> None:
-    """Retry failed attempts at fetching bill info and/or downloading bill text.
-
-    Args:
-        search_limit (datetime, optional): Date after which bills signed into law should be downloaded. Defaults to datetime(1947, 1, 1, 00, 00, 00).
-    """  # noqa: E501
-    requests_error_log = []
-
-    with open(requests_error_path, "r") as file:
-        error_requests = load(file)
-    no_of_request_errors = len(error_requests)
-    with open(billtext_error_path, "r") as file:
-        billtext_error_log = load(file)
-
-    client = Congress()
-    print("Retrying request errors...")
-
-    # Tackle requests error log
-    for request in tqdm(error_requests):
-        OFFSET = request["offset"]
-        LIMIT = request["limit"]
-        list_of_bills, errored_out = get_list_of_bills(
-            client, OFFSET, LIMIT, requests_error_log
+        write_error_files(
+            {
+                self.requests_error_path: self.requests_error_log,
+                self.billtext_error_path: self.billtext_error_log,
+            }
         )
 
-        if errored_out:
-            continue
+    def _print_error_logs_summary(
+        self,
+        requests_error_log: list[dict[str,]],
+        billtext_error_log: list[dict[str,]],
+    ) -> None:
+        """Prints a summary of the error logs."""
+        print("Requests error log length before retrying:", len(requests_error_log))
+        print(
+            "Requests error log length after retrying:",
+            len(self.requests_error_log),
+        )
+        print("Billtext error log length before retrying:", len(billtext_error_log))
+        print(
+            "Billtext error log length after retrying:",
+            len(self.billtext_error_log),
+        )
 
-        for bill in list_of_bills["bills"]:
-            finished_searching, _ = download_public_law_after_date(
-                search_limit, bill, client, billtext_error_log
+    def retry_errors(self) -> None:
+        """Retry failed attempts at fetching bill info and/or downloading bill text."""  # noqa: E501
+        self.requests_error_log = []
+        self.billtext_error_log = []
+        requests_error_log = self._load_error_log(self.requests_error_path)
+        billtext_error_log = self._load_error_log(self.billtext_error_path)
+
+        for request in tqdm(requests_error_log, desc="Retrying requests"):
+            self.OFFSET = request["offset"]
+            self.limit = request["limit"]
+            list_of_bills, errored_out = self.get_list_of_bills()
+            if errored_out:
+                continue
+            self._process_bills(list_of_bills)
+
+        for item in tqdm(billtext_error_log, desc="Retrying billtext"):
+            self.bill = CongressBill(item["bill"])
+            self.download_public_law()
+
+        self._print_error_logs_summary(requests_error_log, billtext_error_log)
+
+        write_error_files(
+            {
+                self.requests_error_path: self.requests_error_log,
+                self.billtext_error_path: self.billtext_error_log,
+            }
+        )
+
+
+# -------------------------------------------------------------------------------------------
+
+
+class CongressBill:
+    def __init__(self, bill: dict[str,]) -> None:
+        self.raw = bill
+        self.congress_number = bill["congress"]
+        self.bill_type = bill["type"]
+        self.bill_number = bill["number"]
+        self.law_number = self.get_public_law_number(bill["latestAction"]["text"])
+        self.bill_title = f"{self.congress_number}-{self.bill_number}"
+        self.latest_action = bill["latestAction"]["text"]
+        self.latest_action_date = bill["latestAction"]["actionDate"]
+        self._law_url = None
+        self._bill_url = None
+        self.client = Congress()
+
+    def _get_public_law_number(self, phrase: str) -> str | None:
+        """Get the law number of a public law.
+
+        Args:
+            phrase (str): Phrase to check for "Became public Law" regex pattern.
+
+        Returns:
+            The public law number.
+        """
+        pattern = r"Became Public Law No: [\d]+-([\d]+)."
+        re_match = re.match(pattern, phrase)
+        if re_match is not None:
+            pl_num = re_match.group(1)
+            return pl_num
+        else:
+            return None
+
+    def _get_text_versions(self):
+        res = loads(
+            self.client.bill(
+                f"{self.raw.congress_number}/{self.raw.bill_type}/{self.raw.bill_number}/text",
+                throttle=True,
             )
-            if finished_searching:
-                break
+        )
+        return res["textVersions"]
 
-    print("Length of requests_error_log before retrying:", no_of_request_errors)
-    print("Length of requests_error_log after retrying:", len(requests_error_log))
+    @property
+    def law_url(self) -> str:
+        """Composes URL where law text is located.
 
-    # Tackle billtext error log
-    no_of_billtext_errors = len(billtext_error_log)
-    new_billtext_error_log = []
+        Args:
+            congress_num (str): The congress number. For example, for the 117th congress, this
+            argument is 117.
+            law_num (str): The public law number. Appended to the name of the downloaded file.
 
-    for item in tqdm(billtext_error_log):
-        download_public_law(item["bill"], client, new_billtext_error_log)
+        Returns:
+            URL where law text is located.
+        """
+        if not self._law_url:
+            self._law_url = f"https://www.congress.gov/{self.congress_number}/plaws/publ{self.law_number}/PLAW-{self.congress_number}publ{self.law_number}.htm"  # noqa E501
+        return self._law_url
 
-    print("Length of billtext_error_log before retrying:", no_of_billtext_errors)
-    print("Length of billtext_error_log after retrying:", len(new_billtext_error_log))
+    @property
+    def bill_url(self) -> str:
+        """Composes URL where bill text is located.
 
-    if requests_error_log:
-        with open(requests_error_path, "w") as file:
-            dump(requests_error_log, file)
-    if new_billtext_error_log:
-        with open(billtext_error_path, "w") as file:
-            dump(new_billtext_error_log, file)
+        Args:
+            congress_num (str): _description_
+            bill_type (str): _description_
+            bill_number (str): _description_
+
+        Returns:
+            str: _description_
+        """
+        if not self._bill_url:
+            self._bill_url = f"https://www.congress.gov/{self.congress_number}/bills/{self.bill_type.lower()}{self.bill_number}/BILLS-{self.congress_number}{self.bill_type.lower()}{self.bill_number}enr.htm"  # noqa E501
+        return self._bill_url

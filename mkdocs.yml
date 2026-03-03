@@ -11,10 +11,18 @@ plugins:
 
 nav:
   - Home: 'index.md'
-  - Sourcing Datasets:
-    - Overview: 'get_all_data.md'
-    - Congress.gov Data: 'congress_data.md'
-    - FRED Data: 'fred_data.md'
-  - Machine Learning:
-    - Data Pipeline: 'preprocess.md'
-    - Building a Model: 'models.md'
+  - Getting Started:
+    - Installation: 'getting_started/installation.md'
+    - Quick Start Guide: 'getting_started/quick_start.md'
+  - Guides:
+    - Data Acquisition: 'guides/data_acquisition.md'
+    - Model Training: 'guides/model_training.md'
+  - Usage Examples:
+    - Basic Usage: 'usage_examples/basic_usage.md'
+    - Advanced Usage: 'usage_examples/advanced_usage.md'
+  - Additional Resources:
+    - API Documentation:
+      - Congress.gov Data: 'resources/congress_data.md'
+      - FRED Data: 'resources/fred_data.md'
+      - Model Design and Training: 'resources/models.md'
+    - Contact: resources/contact.md

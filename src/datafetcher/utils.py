@@ -134,9 +134,9 @@ def json_to_csv(
                 file.write(str_to_write + "\n")
 
 
-def write_error_files(kwargs: dict[str,]) -> None:
+def write_files(kwargs: dict[str,]) -> None:
     """
-    Writes error files to disk
+    Writes files to disk
 
     Args:
         kwargs (dict, optional): Dictionary of key, value pairs where key will become the name of
@@ -148,5 +148,33 @@ def write_error_files(kwargs: dict[str,]) -> None:
                 dump(value, file)
 
 
+def write_error_files(kwargs: dict[str,]) -> None:
+    """
+    Writes error files to disk
+
+    Args:
+        kwargs (dict, optional): Dictionary of key, value pairs where key will become the name of
+        the file and value will be the data written to the file
+    """
+    # TODO: Only write if there is data in value
+    write_files(kwargs)
+
+
 def compose_error_entry(**kwargs):
     return kwargs
+
+
+def load_json_file(file_path: str) -> dict:
+    """
+    Load a JSON file from disk
+
+    Args:
+        file_path (str): Path to the JSON file
+
+    Returns:
+        dict: JSON object
+    """
+    from json import load
+
+    with open(file_path, "r") as file:
+        return load(file)
